@@ -1,0 +1,34 @@
+{
+  "candidates": [
+    ".",
+    "tests/fixtures/repos/multi-skill/skills/alpha",
+    "tests/fixtures/repos/multi-skill/skills/beta",
+    "tests/fixtures/skills/mcp-api",
+    "tests/fixtures/skills/missing-impl",
+    "tests/fixtures/skills/quant-claims",
+    "tests/fixtures/skills/references-logic",
+    "tests/fixtures/skills/script-tool",
+    "tests/fixtures/skills/short-generic",
+    "tests/fixtures/skills/untrusted-injection",
+    "tests/fixtures/skills/vague-readme"
+  ],
+  "candidates_relative_to": "source_root",
+  "commit": null,
+  "dirty": null,
+  "docs": [],
+  "fetched_at": "2026-10-17T19:06:00Z",
+  "input": "./target/slop-skill-auditor",
+  "kind": "local_dir",
+  "notes": [],
+  "ref_requested": null,
+  "repo_url": null,
+  "schema": "slop-skill-auditor/provenance@1",
+  "skill_dir_name": "slop-skill-auditor",
+  "skill_subpath": ".",
+  "skipped": [],
+  "source_root": "source",
+  "tools": {
+    "git": "git version 2.47.3",
+    "python": "3.14.7"
+  }
+}

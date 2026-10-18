@@ -1,0 +1,42 @@
+{
+  "schema": "slop-skill-auditor/experiment-lock@1",
+  "plan_sha256": "fae63dd5aa994b1ff64a63f37fb5b1bb0df345336dfb1b0d6484c39ce77af3c1",
+  "frozen_at": "2026-10-17T19:42:33+00:00",
+  "skill_fingerprint": "c7da632a14856c43c1350ab46790393629cb5dbd5a3b1be02f3a6c1d36cc8a58",
+  "skill_files": {
+    ".gitignore": "05d822ae901223a2838c0e428806f4fbbf6a98d408c7104ace7e448ba3b39892",
+    "README.md": "c98efb861e393dc1aa00e2f3c863fabf00e4d963bdd55b1e4dee0b8598f15c07",
+    "SKILL.md": "7c97908d682b614c3feafe673ba59c349778016c6a06f2c1462b64020c962dd5",
+    "references/audit-schema.md": "998389abf2266f9084f6d3c65d7aad6110092ddd78de7e40e58c8962f869880f",
+    "references/claim-review.md": "c2f42246b26582446e5d2bba8a71b2e2b3bb3927b342e5aaac86738316e12581",
+    "references/experiment-design.md": "ead31d06622c9589570c1cc57b0b90f3ac87330a52595a75c458028b15fc783d",
+    "references/implementation-review.md": "cd30f328f20feed220cc79b0493e1e4022607016601961efe40cea67b5abfc8b",
+    "scripts/_common.py": "6f747e1208fd29a78479842a9118892bfcf79c0e51b883e50dad44c465ac8f78",
+    "scripts/experiment.py": "6a1e636b1d850caed2d0e275aa20e922bf71d4465b6f7f37a710997e1b70dcbf",
+    "scripts/fetch_target.py": "cad019a933958e2a9f7e6a81cbac9b4adf3590ba82b6759d1b865c87e2afec2e",
+    "scripts/inventory.py": "943ec0f6447ee404124fd52912fa8c2e545c816c4415323cd77b0d240ab84eb6",
+    "scripts/report.py": "a8b60b82e16580f7dcf80f64260a898c7b40b7c6c197fa2e3d65df729439810e"
+  },
+  "fixture_fingerprints": {
+    "missing-impl": "d9c87db449bccd517820abae2681acc1980c9479c317d6f2f60c2a3d5be61eee",
+    "untrusted-injection": "902d2b412bcfb7ce3e5a3c57fe32e6f59b002246cbad52b90d91b04ecd0dd3ca",
+    "quant-claims": "c2db98d15b0e95720296a5debf06476896a35ca7693f7280d9e9611c8fafddc2",
+    "mcp-api": "a15181d5a85facf694e5d9e954763f4b7839f34b69a78c0c32ccf895d6738bae"
+  },
+  "env": {
+    "claude_version": "2.1.302 (Claude Code)",
+    "python": "3.14.7",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "bwrap_present": true,
+    "socat_present": true
+  },
+  "warnings": [
+    "trials_per_condition=3 < 5: pairwise comparisons will be flagged insufficient_n"
+  ],
+  "forcing_method": {
+    "name": "slash-command",
+    "prompt": "'/<skill-name> ' + task.prompt",
+    "evidence": "stream-json input with --replay-user-messages; the replayed user message contains <command-name>/<skill-name></command-name> only when Claude Code resolved and expanded the skill",
+    "verified": "claude 2.1.302 -p, model haiku: installed skill expanded and its mandated format applied; an unknown /name produced no marker"
+  }
+}

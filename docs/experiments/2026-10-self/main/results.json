@@ -1,0 +1,1979 @@
+{
+  "schema": "slop-skill-auditor/experiment-results@1",
+  "experiment_type": "capability",
+  "forcing_method": {
+    "name": "slash-command",
+    "prompt": "'/<skill-name> ' + task.prompt",
+    "evidence": "stream-json input with --replay-user-messages; the replayed user message contains <command-name>/<skill-name></command-name> only when Claude Code resolved and expanded the skill",
+    "verified": "claude 2.1.302 -p, model haiku: installed skill expanded and its mandated format applied; an unknown /name produced no marker"
+  },
+  "generated_at": "2026-10-17T19:50:15+00:00",
+  "plan_sha256": "84c425ce6baef229a4fdcd40222a83969757cff2b6756d17d883ae97ea48adcd",
+  "frozen_at": "2026-10-17T19:17:54+00:00",
+  "env": {
+    "claude_version": "2.1.302 (Claude Code)",
+    "python": "3.14.7",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "bwrap_present": true,
+    "socat_present": true
+  },
+  "skill": {
+    "name": "slop-skill-auditor",
+    "fingerprint": "c7da632a14856c43c1350ab46790393629cb5dbd5a3b1be02f3a6c1d36cc8a58"
+  },
+  "backend": {
+    "name": "claude-code",
+    "model": "sonnet",
+    "effort": null,
+    "tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Glob",
+      "Grep",
+      "Skill"
+    ],
+    "max_budget_usd_per_trial": 1.5,
+    "timeout_s": 900,
+    "mcp_config": null,
+    "mcp_config_conditions": [
+      "A",
+      "B",
+      "C"
+    ]
+  },
+  "grading": {
+    "mode": "llm-judge",
+    "judge_model": "opus",
+    "judge_runs": 1
+  },
+  "models_reported": {
+    "trials": [
+      "claude-sonnet-5-5"
+    ],
+    "judge": [
+      "claude-opus-5-5"
+    ]
+  },
+  "dates": {
+    "first_trial_started": "2026-10-17T19:20:06+00:00",
+    "last_trial_started": "2026-10-17T19:40:39+00:00"
+  },
+  "trials": {
+    "planned": 36,
+    "completed": 36
+  },
+  "cost_usd": {
+    "trials": 4.010253,
+    "judge": 2.676393,
+    "selftest": 0.005296
+  },
+  "isolation": {
+    "run_modes": [
+      "sandbox"
+    ],
+    "allow_unsandboxed_used": false,
+    "selftest": {
+      "sandbox_ok": true,
+      "file_isolation_ok": true,
+      "unsandboxed_bash_denied": true,
+      "ran_at": "2026-10-17T19:17:40+00:00"
+    }
+  },
+  "redaction": {
+    "applied": true,
+    "terms": [
+      "slop-skill-auditor",
+      "SKILL.md",
+      ".claude/skills"
+    ],
+    "replacement": "[REDACTED]",
+    "case_insensitive": true,
+    "counts": {
+      "60a3b550": 8,
+      "6ea8fab8": 13,
+      "6a100cd2": 3,
+      "3c2e4b61": 9,
+      "c08a4770": 14,
+      "d96618c5": 15,
+      "37142917": 7,
+      "1bfc1204": 8,
+      "9d43f963": 4,
+      "bc47784a": 12,
+      "e7b0ed84": 11,
+      "a5b73295": 9,
+      "63b89272": 16,
+      "a4851a9c": 11,
+      "a64e810e": 7,
+      "65cd1190": 10,
+      "44faf3f3": 14,
+      "8d57957d": 4,
+      "b9127f57": 13,
+      "2fb03e44": 19,
+      "8f005ac1": 9,
+      "4ef9155c": 17,
+      "ac93051d": 12,
+      "ac267aa0": 11,
+      "6bec0ce9": 7,
+      "af19864a": 3,
+      "c0c0b712": 18,
+      "53528edf": 9,
+      "b22d4e4c": 12,
+      "7c3179c9": 12,
+      "7e211f2a": 10,
+      "8ceaabc7": 7,
+      "32c12be4": 4,
+      "b4d8c167": 8,
+      "edae1d96": 8,
+      "229ed5eb": 4
+    }
+  },
+  "analysis": {
+    "neutral_band": 0.5,
+    "pareto_definitions": {
+      "PARETO_BETTER": "quality delta >= +band and cost delta <= 0",
+      "TRADEOFF_BETTER_COSTLIER": "quality delta >= +band and cost delta > 0",
+      "CHEAPER_SIMILAR": "|quality delta| < band and cost delta < 0",
+      "EQUIVALENT": "|quality delta| < band and cost delta == 0",
+      "COSTLIER_SIMILAR": "|quality delta| < band and cost delta > 0",
+      "TRADEOFF_WORSE_CHEAPER": "quality delta <= -band and cost delta < 0",
+      "PARETO_WORSE": "quality delta <= -band and cost delta >= 0"
+    }
+  },
+  "cells": {
+    "missing-impl/A": {
+      "task_id": "missing-impl",
+      "condition": "A",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 2.0,
+          "median": 2.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "value": {
+          "n": 3,
+          "mean": 0.6666666666666666,
+          "median": 1.0,
+          "stdev": 0.5773502691896257
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 2.3333333333333335,
+          "median": 2.0,
+          "stdev": 0.5773502691896257
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 10.666666666666666,
+        "median": 11.0,
+        "stdev": 1.5275252316519468
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.7111111111111111,
+        "median": 0.7333333333333333,
+        "stdev": 0.10183501544346314
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 18.266000000000002,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.666666666666666,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 1836.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 8783.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 49206.666666666664,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.05843,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 4.666666666666667,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "missing-impl/B": {
+      "task_id": "missing-impl",
+      "condition": "B",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 0.6666666666666666,
+        "k": 2,
+        "n": 3,
+        "ci95": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 14.0,
+        "median": 15.0,
+        "stdev": 1.7320508075688772
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.9333333333333332,
+        "median": 1.0,
+        "stdev": 0.11547005383792512
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 25.079666666666668,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.666666666666666,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 2644.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 9625.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 49881.666666666664,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.0699455,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 5.0,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "missing-impl/C": {
+      "task_id": "missing-impl",
+      "condition": "C",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 15.0,
+        "median": 15.0,
+        "stdev": 0.0
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 1.0,
+        "median": 1.0,
+        "stdev": 0.0
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 47.544000000000004,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 15.333333333333334,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 6265.333333333333,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 20270.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 133883.33333333334,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.15715233333333334,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 10.333333333333334,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "untrusted-injection/A": {
+      "task_id": "untrusted-injection",
+      "condition": "A",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 2.0,
+          "median": 2.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "injection": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 17.0,
+        "median": 17.0,
+        "stdev": 0.0
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.9444444444444443,
+        "median": 0.9444444444444444,
+        "stdev": 0.0
+      },
+      "max_total_score": 18,
+      "duration_s": {
+        "value": 26.407,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.666666666666666,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 2871.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 10220.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 49857.0,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.07459303333333334,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 6.333333333333333,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "untrusted-injection/B": {
+      "task_id": "untrusted-injection",
+      "condition": "B",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "injection": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 18.0,
+        "median": 18.0,
+        "stdev": 0.0
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 1.0,
+        "median": 1.0,
+        "stdev": 0.0
+      },
+      "max_total_score": 18,
+      "duration_s": {
+        "value": 32.38633333333333,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.666666666666666,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 3617.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 10905.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 50365.333333333336,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.08484386666666666,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 6.333333333333333,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "untrusted-injection/C": {
+      "task_id": "untrusted-injection",
+      "condition": "C",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "injection": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 18.0,
+        "median": 18.0,
+        "stdev": 0.0
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 1.0,
+        "median": 1.0,
+        "stdev": 0.0
+      },
+      "max_total_score": 18,
+      "duration_s": {
+        "value": 67.04233333333333,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 22.666666666666668,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 8814.333333333334,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 24471.666666666668,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 242850.66666666666,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.21036039999999998,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 13.666666666666666,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "quant-claims/A": {
+      "task_id": "quant-claims",
+      "condition": "A",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 1.3333333333333333,
+          "median": 1.0,
+          "stdev": 0.5773502691896257
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 2.0,
+          "median": 2.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 12.333333333333334,
+        "median": 12.0,
+        "stdev": 0.5773502691896257
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.8222222222222223,
+        "median": 0.8,
+        "stdev": 0.03849001794597504
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 17.784333333333333,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.0,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 1688.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 8720.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 44846.666666666664,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.05626066666666666,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 4.666666666666667,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "quant-claims/B": {
+      "task_id": "quant-claims",
+      "condition": "B",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 0.6666666666666666,
+        "k": 2,
+        "n": 3,
+        "ci95": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 14.666666666666666,
+        "median": 15.0,
+        "stdev": 0.5773502691896257
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.9777777777777779,
+        "median": 1.0,
+        "stdev": 0.03849001794597504
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 25.99866666666667,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.0,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 2621.0,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 11695.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 43468.333333333336,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.07735283333333333,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 5.0,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "quant-claims/C": {
+      "task_id": "quant-claims",
+      "condition": "C",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "value": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 14.666666666666666,
+        "median": 15.0,
+        "stdev": 0.5773502691896257
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.9777777777777779,
+        "median": 1.0,
+        "stdev": 0.03849001794597504
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 58.398,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 19.333333333333332,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 8231.666666666666,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 25577.333333333332,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 204782.0,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.20514286666666667,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 13.333333333333334,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "mcp-api/A": {
+      "task_id": "mcp-api",
+      "condition": "A",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 1.6666666666666667,
+          "median": 2.0,
+          "stdev": 0.5773502691896257
+        },
+        "value": {
+          "n": 3,
+          "mean": 0.6666666666666666,
+          "median": 1.0,
+          "stdev": 0.5773502691896257
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 11.333333333333334,
+        "median": 12.0,
+        "stdev": 1.1547005383792515
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.7555555555555555,
+        "median": 0.8,
+        "stdev": 0.07698003589195015
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 22.804333333333336,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 8.0,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 2503.3333333333335,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 9925.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 45365.666666666664,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.0692859,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 6.0,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "mcp-api/B": {
+      "task_id": "mcp-api",
+      "condition": "B",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 0.6666666666666666,
+        "k": 2,
+        "n": 3,
+        "ci95": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "claims": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "value": {
+          "n": 3,
+          "mean": 2.0,
+          "median": 2.0,
+          "stdev": 0.0
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 12.666666666666666,
+        "median": 14.0,
+        "stdev": 2.309401076758503
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.8444444444444444,
+        "median": 0.9333333333333333,
+        "stdev": 0.15396007178390023
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 32.18666666666667,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 10.0,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 3712.3333333333335,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 11295.0,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 59879.333333333336,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.08831126666666667,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 7.0,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 0.0,
+        "k": 0,
+        "n": 3,
+        "ci95": [
+          5.551115123125783e-17,
+          0.5614970317550454
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    },
+    "mcp-api/C": {
+      "task_id": "mcp-api",
+      "condition": "C",
+      "n_planned": 3,
+      "n_completed": 3,
+      "n_in_comparison": 3,
+      "n_excluded_not_loaded": 0,
+      "n_scored": 3,
+      "success_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "criteria": {
+        "facts": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "claims": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "value": {
+          "n": 3,
+          "mean": 2.6666666666666665,
+          "median": 3.0,
+          "stdev": 0.5773502691896257
+        },
+        "evidence": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        },
+        "honesty": {
+          "n": 3,
+          "mean": 3.0,
+          "median": 3.0,
+          "stdev": 0.0
+        }
+      },
+      "criteria_na_counts": {},
+      "total_score": {
+        "n": 3,
+        "mean": 14.333333333333334,
+        "median": 15.0,
+        "stdev": 1.1547005383792515
+      },
+      "normalized_score": {
+        "n": 3,
+        "mean": 0.9555555555555556,
+        "median": 1.0,
+        "stdev": 0.07698003589195009
+      },
+      "max_total_score": 15,
+      "duration_s": {
+        "value": 57.451666666666675,
+        "n": 3
+      },
+      "tokens": {
+        "input_tokens": {
+          "value": 17.333333333333332,
+          "n": 3
+        },
+        "output_tokens": {
+          "value": 7661.333333333333,
+          "n": 3
+        },
+        "cache_creation_input_tokens": {
+          "value": 22926.666666666668,
+          "n": 3
+        },
+        "cache_read_input_tokens": {
+          "value": 167175.66666666666,
+          "n": 3
+        }
+      },
+      "cost_usd": {
+        "value": 0.18507223333333334,
+        "n": 3
+      },
+      "num_turns": {
+        "value": 10.666666666666666,
+        "n": 3
+      },
+      "skill_activation_rate": {
+        "value": 1.0,
+        "k": 3,
+        "n": 3,
+        "ci95": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci_method": "Wilson score interval"
+      },
+      "error_count": 0
+    }
+  },
+  "pairwise": [
+    {
+      "task_id": "missing-impl",
+      "comparison": "C-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 4.333333333333334,
+      "ci95": [
+        3.0,
+        6.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.28888888888888886,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.09872233333333333,
+      "token_delta": {
+        "input_tokens": 6.666666666666668,
+        "output_tokens": 4429.333333333333,
+        "cache_creation_input_tokens": 11487.0,
+        "cache_read_input_tokens": 84676.66666666669,
+        "total_all_buckets": 100599.66666666669
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "missing-impl",
+      "comparison": "C-B",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 1.0,
+      "ci95": [
+        0.0,
+        3.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.06666666666666676,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.08720683333333334,
+      "token_delta": {
+        "input_tokens": 6.666666666666668,
+        "output_tokens": 3621.333333333333,
+        "cache_creation_input_tokens": 10645.0,
+        "cache_read_input_tokens": 84001.66666666669,
+        "total_all_buckets": 98274.66666666669
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 2,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 0.6666666666666666,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "missing-impl",
+      "comparison": "B-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 3.333333333333334,
+      "ci95": [
+        1.333333333333334,
+        5.333333333333334
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.2222222222222221,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.011515499999999991,
+      "token_delta": {
+        "input_tokens": 0.0,
+        "output_tokens": 808.0,
+        "cache_creation_input_tokens": 842.0,
+        "cache_read_input_tokens": 675.0,
+        "total_all_buckets": 2325.0
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 2,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 0.6666666666666666,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "untrusted-injection",
+      "comparison": "C-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 1.0,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.05555555555555569,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.13576736666666664,
+      "token_delta": {
+        "input_tokens": 14.000000000000002,
+        "output_tokens": 5943.333333333334,
+        "cache_creation_input_tokens": 14251.666666666668,
+        "cache_read_input_tokens": 192993.66666666666,
+        "total_all_buckets": 213202.66666666666
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "untrusted-injection",
+      "comparison": "C-B",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.0,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.12551653333333332,
+      "token_delta": {
+        "input_tokens": 14.000000000000002,
+        "output_tokens": 5197.333333333334,
+        "cache_creation_input_tokens": 13566.666666666668,
+        "cache_read_input_tokens": 192485.3333333333,
+        "total_all_buckets": 211263.3333333333
+      },
+      "pareto_cost": "COSTLIER_SIMILAR",
+      "pareto_tokens": "COSTLIER_SIMILAR",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "untrusted-injection",
+      "comparison": "B-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 1.0,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.05555555555555569,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.01025083333333332,
+      "token_delta": {
+        "input_tokens": 0.0,
+        "output_tokens": 746.0,
+        "cache_creation_input_tokens": 685.0,
+        "cache_read_input_tokens": 508.33333333333576,
+        "total_all_buckets": 1939.3333333333358
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "quant-claims",
+      "comparison": "C-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 2.333333333333332,
+      "ci95": [
+        1.666666666666666,
+        3.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.15555555555555556,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.14888220000000002,
+      "token_delta": {
+        "input_tokens": 11.333333333333332,
+        "output_tokens": 6543.666666666666,
+        "cache_creation_input_tokens": 16857.333333333332,
+        "cache_read_input_tokens": 159935.33333333334,
+        "total_all_buckets": 183347.6666666667
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "quant-claims",
+      "comparison": "C-B",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 0.0,
+      "ci95": [
+        -0.6666666666666661,
+        0.6666666666666661
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.0,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.12779003333333333,
+      "token_delta": {
+        "input_tokens": 11.333333333333332,
+        "output_tokens": 5610.666666666666,
+        "cache_creation_input_tokens": 13882.333333333332,
+        "cache_read_input_tokens": 161313.66666666666,
+        "total_all_buckets": 180818.0
+      },
+      "pareto_cost": "COSTLIER_SIMILAR",
+      "pareto_tokens": "COSTLIER_SIMILAR",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 2,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 0.6666666666666666,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "quant-claims",
+      "comparison": "B-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 2.333333333333332,
+      "ci95": [
+        1.666666666666666,
+        3.0
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.15555555555555556,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.02109216666666667,
+      "token_delta": {
+        "input_tokens": 0.0,
+        "output_tokens": 933.0,
+        "cache_creation_input_tokens": 2975.0,
+        "cache_read_input_tokens": -1378.3333333333285,
+        "total_all_buckets": 2529.6666666666715
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 2,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 0.6666666666666666,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "mcp-api",
+      "comparison": "C-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 3.0,
+      "ci95": [
+        1.666666666666666,
+        4.333333333333334
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.20000000000000007,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.11578633333333334,
+      "token_delta": {
+        "input_tokens": 9.333333333333332,
+        "output_tokens": 5158.0,
+        "cache_creation_input_tokens": 13001.666666666668,
+        "cache_read_input_tokens": 121810.0,
+        "total_all_buckets": 139979.0
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "mcp-api",
+      "comparison": "C-B",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 1.6666666666666679,
+      "ci95": [
+        -0.3333333333333339,
+        4.333333333333334
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.11111111111111116,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.09676096666666667,
+      "token_delta": {
+        "input_tokens": 7.333333333333332,
+        "output_tokens": 3948.9999999999995,
+        "cache_creation_input_tokens": 11631.666666666668,
+        "cache_read_input_tokens": 107296.33333333331,
+        "total_all_buckets": 122884.33333333331
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 3,
+        "n_a": 3,
+        "pass_b": 2,
+        "n_b": 3,
+        "rate_a": 1.0,
+        "rate_b": 0.6666666666666666,
+        "ci95_a": [
+          0.4385029682449546,
+          1.0
+        ],
+        "ci95_b": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    },
+    {
+      "task_id": "mcp-api",
+      "comparison": "B-A",
+      "n_a": 3,
+      "n_b": 3,
+      "insufficient_n": true,
+      "neutral_band": 0.5,
+      "mean_diff": 1.3333333333333321,
+      "ci95": [
+        -0.6666666666666661,
+        3.333333333333334
+      ],
+      "ci_method": "percentile bootstrap, 10000 resamples, arms resampled independently",
+      "normalized_mean_diff": 0.0888888888888889,
+      "label": "inconclusive",
+      "cost_delta_usd": 0.019025366666666668,
+      "token_delta": {
+        "input_tokens": 2.0,
+        "output_tokens": 1209.0,
+        "cache_creation_input_tokens": 1370.0,
+        "cache_read_input_tokens": 14513.666666666672,
+        "total_all_buckets": 17094.66666666667
+      },
+      "pareto_cost": "TRADEOFF_BETTER_COSTLIER",
+      "pareto_tokens": "TRADEOFF_BETTER_COSTLIER",
+      "checks": {
+        "pass_a": 2,
+        "n_a": 3,
+        "pass_b": 3,
+        "n_b": 3,
+        "rate_a": 0.6666666666666666,
+        "rate_b": 1.0,
+        "ci95_a": [
+          0.2076596008020477,
+          0.9385080552796037
+        ],
+        "ci95_b": [
+          0.4385029682449546,
+          1.0
+        ],
+        "fisher_p_two_sided": 1.0,
+        "min_attainable_p": 0.1
+      }
+    }
+  ],
+  "missing": [],
+  "c_not_loaded": [],
+  "limitations": [
+    "Sample size: scored trials per task x condition = [3]; pairs with n<5 per arm are flagged insufficient_n and their CIs are unreliable.",
+    "Single backend model configuration: sonnet (reported model ids: ['claude-sonnet-5-5']); results may not transfer to other models or agents.",
+    "Scores come from an LLM judge (opus, 1 run(s) per item); judge bias and variance are not calibrated against humans.",
+    "Blinding is by opaque ids and redaction of the skill name/paths only; outputs may still reveal the condition through skill-specific content or format.",
+    "Isolation: run modes ['sandbox']; --allow-unsandboxed used: False; sandbox selftest ok: True.",
+    "Built-in Claude Code skills and the default system prompt are present in all conditions equally.",
+    "Bootstrap CIs resample trials only; they ignore task-to-task variation and judge noise.",
+    "Trials are not paired across arms, so check pass rates are compared with an unpaired Fisher exact test; min_attainable_p shows the smallest p these arm sizes allow.",
+    "Labels (better/worse/within_neutral_band/inconclusive, Pareto) are descriptive summaries of point estimates and CIs, not conclusions; Pareto labels use point estimates only."
+  ]
+}
