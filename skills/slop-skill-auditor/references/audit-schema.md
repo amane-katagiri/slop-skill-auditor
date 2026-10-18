@@ -2,10 +2,20 @@
 
 `report.py skeleton <audit_dir>` で雛形が作れる。`report.py check` が下のルールを検査し、`report.py render` が report.md を作る。文章フィールドはMarkdown可。レポートの言語はユーザーの言語に合わせる（`render --lang ja|en` はラベルと見出しの言語）。
 
+## 文章フィールドの書き方
+
+report.md の読み手は「このスキルを入れるか」を決める人。`summary`・`features`・`claims`・`conclusion` などの自由記述は次のように書く。
+
+- 最初の文で結論を言う。理由はその後に書く。
+- 1文を短くし、1文に1つのことだけを書く。
+- 専門用語や英語の略語（inference・bbox など）を避ける。判定の語彙（`unique_value` など）やID（F1・C1）を文中に書かない。レポートでは短い日本語のラベルと機能名・引用に置き換わる。
+- ファイルと行の根拠は位置フィールド（`locations`・`evidence`・`implementation_evidence` など）に入れ、文中に `path:行` を並べない。
+- 同じ内容を複数のフィールドで繰り返さない（`rationale` で `actual_processing` を言い直さない、`notes` で `implementation_note` を繰り返さない）。
+
 ## 位置（loc）の書式
 
 - `path:LINE` または `path:START-END`。path はスキルルート相対（例 `SKILL.md:12-30`, `scripts/<name>.py:40`）。
-- スキル外のリポジトリ文書は `@repo/README.md:5`、ユーザー提供文書は `@docs/<file>:3`。
+- スキル外のファイル（リポジトリ文書、`external_files` の共有スクリプトやプラグインの hooks など）は `@repo/README.md:5` のように source_root 相対、ユーザー提供文書は `@docs/<file>:3`。
 - `check` が実在と行範囲を検証する。存在しないファイル（欠落参照）は loc にできない。欠落を示すときは、それを**参照している行**を loc にする。
 
 ## 構造
@@ -113,5 +123,5 @@
 - `basis` / `unique_value_basis` の `experiment_observed` は、実在する results_file のある実験が必要。
 - `minimal_prompt.derived_from` は1つ以上必要で、README・`@docs/`・SKILL.md の frontmatter の行だけを指せる（スキル本文から最小指示を作ってはいけない）。
 - `experiments.status: "not_run"` なのに `runs` や `experiment_ref` があればエラー。
-- 警告: `inventory.json` の `review_targets`（SKILL.md、そこから辿れるファイル、スクリプト、README）のうち、どの根拠にも引用されず `not_reviewed` にもないもの。「評価して問題なし」と「評価していない」を区別するため、読まなかったファイルは理由つきで `not_reviewed` に書く。
+- 警告: `inventory.json` の `review_targets`（SKILL.md、そこから辿れるファイル、スクリプト、README、スキル外の `@repo/…` ファイル）のうち、どの根拠にも引用されず `not_reviewed` にもないもの。「評価して問題なし」と「評価していない」を区別するため、読まなかったファイルは理由つきで `not_reviewed` に書く。
 - 警告: 推論だけで「代替可能」を確信度 high にしている、実装が確認済みなのに整合を `inconsistent` にしている、注入候補行があるのに `security_notes` が空、欠落参照がどこにも言及されていない、最小指示が長すぎる、`dropped` が空。

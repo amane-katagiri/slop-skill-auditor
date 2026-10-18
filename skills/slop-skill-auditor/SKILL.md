@@ -27,11 +27,12 @@ description: Audit another Agent Skill (SKILL.md format, for Claude Code / Codex
 2. **棚卸し**: `inventory.py <audit_dir>`。ファイル一覧・frontmatter・参照関係（欠落参照）・外部能力の手がかり・注入候補行・fingerprintが `inventory.json` に入る。これは機械的な手がかりで、判定ではない。
 3. **最小指示案を先に書く**: README・`@docs/`・SKILL.md の frontmatter（description）**だけ**を読み、「普通のユーザーがその目的を数行で頼んだら」という最小指示案を `audit.json` の `minimal_prompt` に書いて固定する。本文を読んだ後に書き直さない（理由と手順は implementation-review.md §3.4）。
 4. **精読**: SKILL.mdと、そこから参照される全ファイル、READMEを実際に読む。スクリプトは処理を追って、入力・出力・外部呼び出しを把握する。根拠は `path:行` で控える（スキルルート相対、スキル外のリポジトリ文書は `@repo/…`、ユーザー提供文書は `@docs/…`）。`inventory.json` の `review_targets` で読まなかったものは、理由を `not_reviewed` に書く。
+   - スキルディレクトリ外のファイル（`inventory.json` の `external_files`。親ディレクトリにある共有スクリプトなど）と、スキルと一緒に入るプラグインの hooks・MCPサーバー（`plugin`。hooks は利用者の操作なしに自動で実行される）もスキルの動作の一部として必ず読んで評価し、根拠は `@repo/…` で示す。
 5. **評価**: 基準は references を読んでから適用する。
    - 実装・機能の分解、必要性と独自価値、最小指示案 → [references/implementation-review.md](references/implementation-review.md)
    - READMEの主張の分解と多軸判定（実装・効果・宣伝との整合・独自価値・確信度） → [references/claim-review.md](references/claim-review.md)
 6. **記録**: 結果を `<audit_dir>/audit.json` に書く（スキーマと例は [references/audit-schema.md](references/audit-schema.md)）。
-7. **検証と出力**: `report.py check <audit_dir>` で根拠の行番号・ラベル・実験との整合を検査し、エラーを直してから `report.py render <audit_dir> [--lang ja|en]` で `report.md` を生成する。ユーザーにはレポートの要点（Summary と Conclusion）と report.md のパスを伝える。一時ディレクトリに置いた場合は、再起動などで消えうることを添えて、残すなら移動先を聞く（`audit_dir` ごと移動すればよい。中のパスは相対なので壊れない）。
+7. **検証と出力**: `report.py check <audit_dir>` で根拠の行番号・ラベル・実験との整合を検査し、エラーを直してから `report.py render <audit_dir> [--lang ja|en]` で `report.md` を生成する。ユーザーにはレポートの要点（冒頭の結論と要約）と report.md のパスを伝える。一時ディレクトリに置いた場合は、再起動などで消えうることを添えて、残すなら移動先を聞く（`audit_dir` ごと移動すればよい。中のパスは相対なので壊れない）。
 
 レポートの最後で、検証に値する主張があれば対照実験を提案してよい。ただし実行はしない。
 

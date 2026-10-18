@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import LocationResolver, load_json, write_json  # noqa: E402
+from _common import LOC_RE, LocationResolver, load_json, write_json  # noqa: E402
 
 SCHEMA = "slop-skill-auditor/audit@1"
 
@@ -40,119 +40,136 @@ LABELS = {
     "ja": {
         "instruction": "指示", "knowledge": "知識", "procedure": "手順",
         "tool": "ツール", "algorithm": "アルゴリズム", "environment": "環境",
-        "base_model": "モデル標準能力で代替可能と考えられる",
-        "short_instruction": "短い追加指示で代替可能と考えられる",
-        "unique_value": "独自の知識・手順・実装が価値を持つ",
-        "external_capability": "外部能力が必要",
-        "undetermined": "現時点では判断不能",
-        "implementation.confirmed": "確認済み",
-        "implementation.partial": "一部のみ",
-        "implementation.missing": "欠落",
-        "implementation.contradicted": "説明と矛盾",
-        "implementation.not_applicable": "該当なし",
-        "implementation.unknown": "不明",
-        "effect.experimentally_supported": "実験で支持",
-        "effect.not_supported_in_experiment": "実験で支持されず",
-        "effect.unverified": "未検証",
-        "effect.not_assessable": "評価不能",
-        "consistency.consistent": "整合",
-        "consistency.possibly_exaggerated": "誇張の疑い",
-        "consistency.inconsistent": "不一致",
-        "consistency.not_assessable": "評価不能",
+        "base_model": "素のモデルで足りそう",
+        "short_instruction": "短い指示で足りそう",
+        "unique_value": "スキル固有の価値あり",
+        "external_capability": "外部の仕組みが必要",
+        "undetermined": "判断できない",
+        "implementation.confirmed": "実装を確認できた",
+        "implementation.partial": "実装は一部だけ",
+        "implementation.missing": "実装が見つからない",
+        "implementation.contradicted": "実装が説明と食い違う",
+        "implementation.not_applicable": "実装で確かめる種類の主張ではない",
+        "implementation.unknown": "実装を確かめられなかった",
+        "effect.experimentally_supported": "実験で裏付けられた",
+        "effect.not_supported_in_experiment": "実験では裏付けられなかった",
+        "effect.unverified": "測定はない",
+        "effect.not_assessable": "確かめようがない",
+        "consistency.consistent": "実装と根拠に見合っている",
+        "consistency.possibly_exaggerated": "実装と根拠に比べてやや強い",
+        "consistency.inconsistent": "実装や根拠と合わない",
+        "consistency.not_assessable": "判断できない",
         "confidence.high": "高", "confidence.medium": "中", "confidence.low": "低",
-        "implementation_confirmed": "実装確認済み",
-        "inference": "推論による仮説",
+        "implementation_confirmed": "実装で確認",
+        "inference": "推測",
         "experiment_observed": "実験で観測",
         "unconfirmed": "未確認",
-        "clear_unique_value": "導入による独自価値が明確",
-        "unique_value_unverified": "独自価値はあるが効果は未検証",
-        "likely_replaceable_by_short_prompt": "簡単な指示で代替できる可能性が高い",
-        "claims_exceed_evidence": "宣伝に対して実装・根拠が不足",
-        "insufficient_information": "判断材料不足",
-        "possible_negative_effect": "悪影響・過剰な制約の可能性",
+        "clear_unique_value": "導入する価値がはっきりしている",
+        "unique_value_unverified": "独自の価値はあるが効果は未確認",
+        "likely_replaceable_by_short_prompt": "簡単な指示で代わりになる可能性が高い",
+        "claims_exceed_evidence": "宣伝に対して実装や根拠が足りない",
+        "insufficient_information": "判断材料が足りない",
+        "possible_negative_effect": "悪影響や過剰な制約の可能性",
+        "kind.github_repo": "GitHubのリポジトリ", "kind.github_tree": "GitHubのフォルダURL",
+        "kind.github_blob": "GitHubのファイルURL", "kind.local_dir": "手元のフォルダ", "kind.local_skill_md": "手元のSKILL.md",
+        "dirty.True": "あり", "dirty.False": "なし",
     },
     "en": {
         "instruction": "Instruction", "knowledge": "Knowledge", "procedure": "Procedure",
         "tool": "Tool", "algorithm": "Algorithm", "environment": "Environment",
-        "base_model": "Likely replaceable by the base model",
-        "short_instruction": "Likely replaceable by a short instruction",
-        "unique_value": "Unique knowledge/procedure/implementation adds value",
-        "external_capability": "Requires external capability",
-        "undetermined": "Undetermined",
-        "implementation.confirmed": "Confirmed",
-        "implementation.partial": "Partial",
-        "implementation.missing": "Missing",
-        "implementation.contradicted": "Contradicts description",
-        "implementation.not_applicable": "N/A",
-        "implementation.unknown": "Unknown",
-        "effect.experimentally_supported": "Experimentally supported",
-        "effect.not_supported_in_experiment": "Not supported in experiment",
-        "effect.unverified": "Unverified",
-        "effect.not_assessable": "Not assessable",
-        "consistency.consistent": "Consistent",
-        "consistency.possibly_exaggerated": "Possibly exaggerated",
-        "consistency.inconsistent": "Inconsistent",
-        "consistency.not_assessable": "Not assessable",
-        "confidence.high": "High", "confidence.medium": "Medium", "confidence.low": "Low",
-        "implementation_confirmed": "Confirmed in implementation",
-        "inference": "Inference",
-        "experiment_observed": "Observed in experiment",
-        "unconfirmed": "Unconfirmed",
-        "clear_unique_value": "Clear unique value",
-        "unique_value_unverified": "Unique value, effect unverified",
-        "likely_replaceable_by_short_prompt": "Likely replaceable by a short prompt",
-        "claims_exceed_evidence": "Claims exceed implementation/evidence",
-        "insufficient_information": "Insufficient information",
-        "possible_negative_effect": "Possible negative effect / over-constraint",
+        "base_model": "The base model is likely enough",
+        "short_instruction": "A short instruction is likely enough",
+        "unique_value": "Has skill-specific value",
+        "external_capability": "Needs an external capability",
+        "undetermined": "Cannot tell",
+        "implementation.confirmed": "implementation found",
+        "implementation.partial": "only partly implemented",
+        "implementation.missing": "no implementation found",
+        "implementation.contradicted": "the implementation contradicts the description",
+        "implementation.not_applicable": "not something code can show",
+        "implementation.unknown": "could not be checked",
+        "effect.experimentally_supported": "supported by an experiment",
+        "effect.not_supported_in_experiment": "not supported by an experiment",
+        "effect.unverified": "not measured",
+        "effect.not_assessable": "cannot be checked",
+        "consistency.consistent": "in line with the implementation and evidence",
+        "consistency.possibly_exaggerated": "somewhat stronger than the implementation and evidence",
+        "consistency.inconsistent": "does not match the implementation or evidence",
+        "consistency.not_assessable": "cannot be judged",
+        "confidence.high": "high", "confidence.medium": "medium", "confidence.low": "low",
+        "implementation_confirmed": "confirmed in code",
+        "inference": "inference",
+        "experiment_observed": "observed in an experiment",
+        "unconfirmed": "unconfirmed",
+        "clear_unique_value": "Clearly worth installing",
+        "unique_value_unverified": "Has its own value, but the effect is unconfirmed",
+        "likely_replaceable_by_short_prompt": "A simple instruction can likely replace it",
+        "claims_exceed_evidence": "The claims go beyond the implementation and evidence",
+        "insufficient_information": "Not enough information to judge",
+        "possible_negative_effect": "May do harm or over-constrain",
+        "kind.github_repo": "GitHub repository", "kind.github_tree": "GitHub folder URL",
+        "kind.github_blob": "GitHub file URL", "kind.local_dir": "local folder", "kind.local_skill_md": "local SKILL.md",
+        "dirty.True": "yes", "dirty.False": "no",
     },
 }
 
 HEADINGS = {
     "ja": {
-        "title": "スキル監査レポート", "provenance": "監査対象と条件", "summary": "Summary",
-        "purpose": "主な目的", "actual_behavior": "実際に行うこと",
-        "unique_capabilities": "独自の実装や外部能力", "expected_value": "期待できる付加価値",
-        "claim_consistency": "宣伝との整合性", "open_questions": "重要な疑問点",
-        "activation": "起動条件", "implementation": "Implementation", "claims": "Claims",
-        "necessity": "Necessity", "base_model": "素のモデルでできそうな部分",
-        "short_instruction": "数行の指示で代替できそうな部分", "unique_value": "スキル固有の価値",
-        "redundant": "不要または冗長と思われる構成", "unconfirmed": "確証がない部分",
-        "minimal_prompt": "最小指示案（B群）", "dropped": "最小指示で再現できないもの",
-        "experiments": "Experimental Results", "not_run": "対照実験は未実施。実験で検証することが望ましい主張:",
-        "security": "セキュリティ上の注意（副次的な記録）", "conclusion": "Conclusion",
-        "limitations": "監査の限界", "not_reviewed": "レビューしていないファイル", "feature_details": "機能の詳細",
-        "col_feature": "機能", "col_processing": "実際の処理", "col_location": "実装場所",
-        "col_subst": "モデルだけで代替できるか", "col_claim": "READMEの主張",
-        "col_impl": "実装上の根拠", "col_exp": "実験上の根拠",
-        "axis_implementation": "実装", "axis_effect": "効果", "axis_consistency": "宣伝との整合",
-        "axis_unique_value": "独自価値", "axis_confidence": "確信度",
-        "tally": "判定の集計", "axis": "観点", "value": "判定", "count": "件数",
-        "categories": "分類", "external": "外部能力", "effect": "期待される効果", "rationale": "理由",
-        "basis": "根拠の種類", "none": "なし", "not_run_cell": "実験未実施",
-        "source": "出典", "mechanism": "仕組み", "claimed_effect": "主張されている効果",
+        "title": "スキル監査レポート", "conclusion": "結論", "summary": "要約",
+        "purpose": "目的", "actual_behavior": "実際にしていること",
+        "unique_capabilities": "独自の実装や外部の仕組み", "expected_value": "期待できる効果",
+        "claim_consistency": "宣伝との一致", "open_questions": "まだ分からないこと",
+        "behavior": "このスキルがしていること", "activation": "いつ使われるか",
+        "claims": "宣伝の確認", "necessity": "スキルなしで足りるか",
+        "base_model": "素のモデルでできそうなこと", "short_instruction": "短い指示で足りそうなこと",
+        "unique_value": "スキル固有の価値", "redundant": "不要・重複していそうな部分", "unconfirmed": "確かめられていないこと",
+        "minimal_prompt": "比較用の短い指示", "minimal_prompt_intro": "目的だけを普通に頼んだ場合の指示。実験ではこれをスキルと比べる。",
+        "dropped": "この指示では再現できないこと",
+        "experiments": "実験", "not_run": "対照実験はしていない。実験で確かめるとよい点:",
+        "results": "結果", "not_embedded": "監査フォルダの外なので埋め込まない",
+        "concerns": "気になった点", "conditions_limits": "監査の条件と限界", "conditions": "条件",
+        "limitations": "限界", "not_reviewed": "読んでいないファイル",
+        "col_feature": "機能", "col_subst": "スキルなしで足りるか", "col_confidence": "確かさ",
+        "axis_implementation": "仕組み", "axis_effect": "効果", "axis_consistency": "宣伝の強さ",
+        "axis_unique_value": "代わりになるか", "axis_confidence": "確かさ",
+        "tally": "付録: 判定の集計", "axis": "観点", "value": "判定", "count": "件数",
+        "categories": "種類", "external": "使う外部の仕組み", "effect": "期待される効果", "rationale": "判断の理由",
+        "none": "なし", "source": "出典", "mechanism": "説明されている仕組み", "claimed_effect": "主張している効果",
+        "impl_note": "実装との照合", "exp_note": "実験", "notes": "補足", "evidence": "根拠",
+        "task_idea": "方法の案", "target_claims": "対象の宣伝",
+        "input": "入力", "kind": "取得方法", "repo": "リポジトリ", "commit": "commit", "dirty": "未コミットの変更",
+        "skill_subpath": "スキルの場所", "fetched_at": "取得日時", "fingerprint": "ファイルの指紋",
+        "model": "監査したモデル", "runtime": "実行環境", "date": "監査日",
+        "sep": "、", "end": "。", "lines": "{}行", "colon": ": ", "q": "「{}」",
     },
     "en": {
-        "title": "Skill Audit Report", "provenance": "Target and conditions", "summary": "Summary",
+        "title": "Skill Audit Report", "conclusion": "Conclusion", "summary": "Summary",
         "purpose": "Purpose", "actual_behavior": "What it actually does",
-        "unique_capabilities": "Own implementation / external capabilities", "expected_value": "Expected added value",
-        "claim_consistency": "Consistency with claims", "open_questions": "Open questions",
-        "activation": "Activation", "implementation": "Implementation", "claims": "Claims",
-        "necessity": "Necessity", "base_model": "Likely doable by the base model",
-        "short_instruction": "Replaceable by a few lines of instruction", "unique_value": "Skill-specific value",
-        "redundant": "Unnecessary or redundant parts", "unconfirmed": "Unconfirmed",
-        "minimal_prompt": "Minimal prompt (condition B)", "dropped": "Not reproducible with the minimal prompt",
-        "experiments": "Experimental Results", "not_run": "No controlled experiment was run. Claims worth testing:",
-        "security": "Security notes (secondary)", "conclusion": "Conclusion",
-        "limitations": "Limitations of this audit", "not_reviewed": "Files not reviewed", "feature_details": "Feature details",
-        "col_feature": "Feature", "col_processing": "Actual processing", "col_location": "Location",
-        "col_subst": "Replaceable by model alone?", "col_claim": "Claim",
-        "col_impl": "Implementation evidence", "col_exp": "Experimental evidence",
-        "axis_implementation": "Implementation", "axis_effect": "Effect", "axis_consistency": "Consistency with claim",
-        "axis_unique_value": "Unique value", "axis_confidence": "Confidence",
-        "tally": "Tally", "axis": "Axis", "value": "Value", "count": "Count",
-        "categories": "Categories", "external": "External capabilities", "effect": "Expected effect", "rationale": "Rationale",
-        "basis": "Basis", "none": "none", "not_run_cell": "not run",
-        "source": "Source", "mechanism": "Mechanism", "claimed_effect": "Claimed effect",
+        "unique_capabilities": "Own implementation and external capabilities", "expected_value": "Expected benefit",
+        "claim_consistency": "Match with its claims", "open_questions": "Still unknown",
+        "behavior": "What the skill does", "activation": "When it is used",
+        "claims": "Checking the claims", "necessity": "Is the skill needed?",
+        "base_model": "Likely doable by the base model", "short_instruction": "Likely covered by a short instruction",
+        "unique_value": "Skill-specific value", "redundant": "Likely unnecessary or duplicated", "unconfirmed": "Not confirmed",
+        "minimal_prompt": "Short instruction for comparison",
+        "minimal_prompt_intro": "What a user would write to ask for the same goal. Experiments compare the skill against this.",
+        "dropped": "What this instruction cannot reproduce",
+        "experiments": "Experiments", "not_run": "No controlled experiment was run. Points worth testing:",
+        "results": "Results", "not_embedded": "outside the audit directory; not embedded",
+        "concerns": "Concerns", "conditions_limits": "Audit conditions and limits", "conditions": "Conditions",
+        "limitations": "Limits", "not_reviewed": "Files not read",
+        "col_feature": "Feature", "col_subst": "Needed beyond the model?", "col_confidence": "Confidence",
+        "axis_implementation": "Mechanism", "axis_effect": "Effect", "axis_consistency": "Strength of the claim",
+        "axis_unique_value": "Replaceable?", "axis_confidence": "Confidence",
+        "tally": "Appendix: tally of ratings", "axis": "Aspect", "value": "Rating", "count": "Count",
+        "categories": "Kind", "external": "External capabilities", "effect": "Expected effect", "rationale": "Why",
+        "none": "none", "source": "Source", "mechanism": "Stated mechanism", "claimed_effect": "Claimed effect",
+        "impl_note": "Against the implementation", "exp_note": "Experiment", "notes": "Notes", "evidence": "Evidence",
+        "task_idea": "How", "target_claims": "Claims",
+        "input": "Input", "kind": "Fetched as", "repo": "Repository", "commit": "Commit", "dirty": "Uncommitted changes",
+        "skill_subpath": "Skill location", "fetched_at": "Fetched at", "fingerprint": "File fingerprint",
+        "model": "Audited by model", "runtime": "Runtime", "date": "Audit date",
+        "sep": "; ", "end": ".", "lines": "lines {}", "colon": ": ", "q": "“{}”",
     },
 }
 
@@ -500,6 +517,44 @@ def _bullets(items, none):
     return [f"- {_item(x)}" for x in items]
 
 
+def _evidence(locs, H, lang):
+    groups = {}
+    for loc in _strings(locs):
+        m = LOC_RE.match(loc.strip())
+        path, rng = (m.group(1), (m.group(2), m.group(3))) if m else (loc.strip(), None)
+        groups.setdefault(path, [])
+        if rng and rng not in groups[path]:
+            groups[path].append(rng)
+    parts = []
+    for path, rngs in groups.items():
+        if not rngs:
+            parts.append(_code(path))
+            continue
+        dash = "〜" if lang == "ja" else "–"
+        nums = ", ".join(s if not e or e == s else f"{s}{dash}{e}" for s, e in rngs)
+        label = H["lines"].format(nums)
+        if lang == "en" and len(rngs) == 1 and (not rngs[0][1] or rngs[0][1] == rngs[0][0]):
+            label = f"line {nums}"
+        parts.append(f"{_code(path)} {label}")
+    return f"{H['evidence']}{H['colon']}{H['sep'].join(parts)}" if parts else ""
+
+
+def _short_quote(text, limit=60):
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= limit else t[: limit - 1] + "…"
+
+
+def _sentence(label, text, H):
+    t = _line(text)
+    if not t:
+        return ""
+    return f"{label}{H['colon']}{t}" + ("" if t.endswith(("。", ".", "!", "?", "！", "？", "）", ")")) else H["end"])
+
+
+def _paragraph(parts):
+    return [p for p in parts if p]
+
+
 def render(audit_dir, lang):
     L, H = LABELS[lang], HEADINGS[lang]
     a = load_json(audit_dir / "audit.json")
@@ -508,143 +563,158 @@ def render(audit_dir, lang):
     name = (inv.get("frontmatter") or {}).get("parsed", {}).get("name") or inv.get("skill_name_dir") or audit_dir.name
     out = [f"# {H['title']}: {_line(name)}", ""]
 
-    auditor = a.get("auditor") or {}
-    out += [f"## {H['provenance']}", ""]
-    rows = [
-        ("input", prov.get("input")),
-        ("kind", prov.get("kind")),
-        ("repo", prov.get("repo_url")),
-        ("commit", prov.get("commit")),
-        ("dirty", prov.get("dirty")),
-        ("skill_subpath", prov.get("skill_subpath")),
-        ("fetched_at", prov.get("fetched_at")),
-        ("fingerprint", inv.get("fingerprint")),
-        ("auditor.model", auditor.get("model")),
-        ("auditor.runtime", auditor.get("runtime")),
-        ("audit date", auditor.get("date")),
-    ]
-    out += [f"- {k}: {_code(v)}" for k, v in rows if v not in (None, "")]
-    out.append("")
+    def lab(v, prefix=""):
+        return L.get(f"{prefix}{v}", L.get(v, v)) if v is not None else "-"
 
-    s = a.get("summary") or {}
+    con = _field(a, "conclusion")
+    out += [f"## {H['conclusion']}", ""]
+    verdicts = _strings(con.get("verdicts"))
+    if verdicts:
+        out += [_line(" / ".join(lab(v) for v in verdicts)), ""]
+    out += _bullets(con.get("reasons"), H["none"]) + [""]
+
+    s = _field(a, "summary")
     out += [f"## {H['summary']}", ""]
     for key in ("purpose", "actual_behavior", "unique_capabilities", "expected_value", "claim_consistency"):
-        out.append(f"- **{H[key]}**: {_line(s.get(key, ''))}")
+        if s.get(key):
+            out.append(f"- {H[key]}{H['colon']}{_line(s[key])}")
     if s.get("open_questions"):
-        out.append(f"- **{H['open_questions']}**:")
+        out.append(f"- {H['open_questions']}{H['colon'].rstrip()}")
         out += [f"  - {_item(q)}" for q in s["open_questions"]]
     out.append("")
-    act = a.get("activation") or {}
-    out += [f"**{H['activation']}**: {_line(act.get('description', ''))} {_locs(act.get('evidence', []))}", ""]
 
-    feats = a.get("features") or []
-    out += [f"## {H['implementation']}", ""]
-    out += [f"| {H['col_feature']} | {H['col_processing']} | {H['col_location']} | {H['col_subst']} |", "|---|---|---|---|"]
-    for ft in feats:
-        subst = f"{L.get(ft.get('substitutability'), ft.get('substitutability'))} ({L.get(ft.get('basis'), ft.get('basis'))} / {H['axis_confidence']}: {L.get('confidence.' + str(ft.get('confidence')), ft.get('confidence'))})"
-        locs = _locs(ft.get("locations", [])).replace("|", "\\|")
-        out.append(f"| {_cell(ft.get('id'))} {_cell(ft.get('name'))} | {_cell(ft.get('actual_processing'))} | {locs} | {_cell(subst)} |")
-    out += ["", f"### {H['feature_details']}", ""]
-    for ft in feats:
-        out.append(f"#### {_line(ft.get('id'))} {_line(ft.get('name'))}")
-        out.append(f"- {H['categories']}: {_line(', '.join(L.get(c, c) for c in ft.get('categories', [])))}")
-        out.append(f"- {H['external']}: {_line(', '.join(ft.get('external_capabilities') or [])) or H['none']}")
-        if ft.get("expected_effect"):
-            out.append(f"- {H['effect']}: {_line(ft['expected_effect'])}")
-        if ft.get("rationale"):
-            out.append(f"- {H['rationale']}: {_line(ft['rationale'])}")
+    feats = _dicts(a.get("features"))
+    out += [f"## {H['behavior']}", ""]
+    act = _field(a, "activation")
+    if act.get("description") or act.get("evidence"):
+        out += _paragraph([_sentence(H["activation"], act.get("description"), H), _evidence(act.get("evidence"), H, lang)]) + [""]
+    if feats:
+        out += [f"| {H['col_feature']} | {H['col_subst']} | {H['col_confidence']} |", "|---|---|---|"]
+        for ft in feats:
+            subst = f"{lab(ft.get('substitutability'))}（{lab(ft.get('basis'))}）" if lang == "ja" else \
+                f"{lab(ft.get('substitutability'))} ({lab(ft.get('basis'))})"
+            out.append(f"| {_cell(ft.get('name'))} | {_cell(subst)} | {_cell(lab(ft.get('confidence'), 'confidence.'))} |")
         out.append("")
+    for ft in feats:
+        out += [f"### {_line(ft.get('name'))}", ""]
+        cats = H["sep"].join(lab(c) for c in _strings(ft.get("categories")))
+        out += _paragraph([
+            _line(ft.get("actual_processing")),
+            _sentence(H["effect"], ft.get("expected_effect"), H),
+            _sentence(H["external"], ", ".join(_strings(ft.get("external_capabilities"))), H),
+            _sentence(H["rationale"], ft.get("rationale"), H),
+            _sentence(H["categories"], cats, H),
+            _evidence(ft.get("locations"), H, lang),
+        ]) + [""]
 
-    claims = a.get("claims") or []
+    claims = _dicts(a.get("claims"))
+    quotes = {c.get("id"): _short_quote(c.get("quote"), 40) for c in claims}
     out += [f"## {H['claims']}", ""]
-    if claims:
-        out += ["| " + " | ".join([H["col_claim"]] + [H[f"axis_{x}"] for x in AXES]) + " |", "|---" * (len(AXES) + 1) + "|"]
-        for c in claims:
-            ax = c.get("assessment") or {}
-            cells = [_cell(L.get(f"{x}.{ax.get(x)}", L.get(ax.get(x), ax.get(x)))) for x in AXES]
-            cells[3] += f"<br>({_cell(L.get(c.get('unique_value_basis'), c.get('unique_value_basis')))})"
-            src = _code(c.get("source")).replace("|", "\\|")
-            out.append(f"| {_cell(c.get('id'))}: “{_cell(c.get('quote'))}” {src} | " + " | ".join(cells) + " |")
-        out += ["", f"**{H['tally']}**", "", f"| {H['axis']} | {H['value']} | {H['count']} |", "|---|---|---|"]
-        for x in AXES:
-            counts = {}
-            for c in claims:
-                v = (c.get("assessment") or {}).get(x)
-                counts[v] = counts.get(v, 0) + 1
-            for v in AXES[x]:
-                if counts.get(v):
-                    out.append(f"| {H[f'axis_{x}']} | {_cell(L.get(f'{x}.{v}', L.get(v, v)))} | {counts[v]} |")
-        out.append("")
-        for c in claims:
-            exp = _line(c.get("experimental_evidence") or "")
-            if c.get("experiment_ref"):
-                exp = f"{exp} (exp {_code(c['experiment_ref'])})".strip()
-            if c.get("experimental_evidence_locations"):
-                exp = f"{exp} {_locs(c['experimental_evidence_locations'])}".strip()
-            if not exp:
-                exp = H["not_run_cell"] if (a.get("experiments") or {}).get("status") != "run" else H["none"]
-            impl = " ".join(x for x in [_line(c.get("implementation_note") or ""), _locs(c.get("implementation_evidence", []))] if x)
-            out.append(f"#### {_line(c.get('id'))}")
-            for k, v in ((H["claimed_effect"], _line(c.get("claimed_effect"))), (H["mechanism"], _line(c.get("mechanism"))),
-                         (H["col_impl"], impl), (H["col_exp"], exp), ("notes", _line(c.get("notes")))):
-                if v:
-                    out.append(f"- {k}: {v}")
-            out.append("")
-    else:
+    if not claims:
         out += [f"- {H['none']}", ""]
+    ex = _field(a, "experiments")
+    for c in claims:
+        short = _short_quote(c.get("quote"))
+        out += [f"### {H['q'].format(_line(short))}", ""]
+        src = _evidence([c.get("source")], H, lang).split(H["colon"], 1)[-1] if c.get("source") else ""
+        quote_line = f"> {H['q'].format(_line(c.get('quote')))}" if short != " ".join(str(c.get("quote") or "").split()) else ""
+        if quote_line or src:
+            out += _paragraph([quote_line, f"> {H['source']}{H['colon']}{src}" if src else ""]) + [""]
+        ax = _field(c, "assessment")
+        for x in AXES:
+            value = lab(ax.get(x), f"{x}." if x not in ("unique_value",) else "")
+            if x == "unique_value":
+                value = f"{value}（{lab(c.get('unique_value_basis'))}）" if lang == "ja" else f"{value} ({lab(c.get('unique_value_basis'))})"
+            out.append(f"- {H[f'axis_{x}']}{H['colon']}{_line(value)}{H['end']}")
+        out.append("")
+        exp = _line(c.get("experimental_evidence") or "")
+        if c.get("experiment_ref"):
+            exp = f"{exp} ({_code(c['experiment_ref'])})".strip()
+        out += _paragraph([
+            _sentence(H["claimed_effect"], c.get("claimed_effect"), H),
+            _sentence(H["mechanism"], c.get("mechanism"), H),
+            _sentence(H["impl_note"], c.get("implementation_note"), H),
+            f"{H['exp_note']}{H['colon']}{exp}" if exp else "",
+            _sentence(H["notes"], c.get("notes"), H),
+            _evidence(_strings(c.get("implementation_evidence")) + _strings(c.get("experimental_evidence_locations")), H, lang),
+        ]) + [""]
 
-    nec = a.get("necessity") or {}
+    nec = _field(a, "necessity")
     out += [f"## {H['necessity']}", ""]
     for key in ("base_model", "short_instruction", "unique_value", "redundant", "unconfirmed"):
-        out += [f"**{H[key]}**", ""] + _bullets(nec.get(key), H["none"]) + [""]
-    mp = a.get("minimal_prompt") or {}
+        if nec.get(key):
+            out += [f"{H[key]}{H['colon'].rstrip()}", ""] + _bullets(nec.get(key), H["none"]) + [""]
+    mp = _field(a, "minimal_prompt")
     text = str(mp.get("text", ""))
-    out += [f"### {H['minimal_prompt']}", "", _fence(text) + "text", text, _fence(text), "", f"**{H['dropped']}**", ""]
-    out += _bullets(mp.get("dropped"), H["none"]) + [""]
+    out += [f"### {H['minimal_prompt']}", "", H["minimal_prompt_intro"], "", _fence(text) + "text", text, _fence(text), ""]
+    out += [f"{H['dropped']}{H['colon'].rstrip()}", ""] + _bullets(mp.get("dropped"), H["none"]) + [""]
 
-    ex = a.get("experiments") or {}
+    out += [f"## {H['experiments']}", ""]
     if ex.get("status") == "run":
-        out += [f"## {H['experiments']}", ""]
-        for run in ex.get("runs", []):
-            out += [f"### {_line(run['id'])}", ""]
+        for run in _dicts(ex.get("runs")):
+            out += [f"### {_line(run.get('id'))}", ""]
             if run.get("summary"):
                 out += [_item(run["summary"]), ""]
-            rf = run["results_file"]
+            rf = run.get("results_file")
             md = (audit_dir / rf).with_suffix(".md") if isinstance(rf, str) else None
             if md is None or not _inside(audit_dir, md):
-                out += [f"- results: {_code(rf)} (outside the audit directory; not embedded)", ""]
+                out += [f"- {H['results']}{H['colon']}{_code(rf)} ({H['not_embedded']})", ""]
                 continue
-            out += [f"- results: {_code(rf)}", ""]
+            out += [f"- {H['results']}{H['colon']}{_code(rf)}", ""]
             if md.exists():
                 body = _esc(md.read_text(encoding="utf-8").strip())
                 out += ["<details><summary>results.md</summary>", "", body, "", "</details>", ""]
-    if ex.get("status") != "run" or ex.get("recommended"):
-        if ex.get("status") != "run":
-            out += [f"## {H['experiments']}", "", H["not_run"], ""]
-        if ex.get("status") != "run" and not ex.get("recommended"):
+    else:
+        out += [H["not_run"], ""]
+        if not ex.get("recommended"):
             out.append(f"- {H['none']}")
-        for r in ex.get("recommended", []):
-            ids = _line(", ".join(r.get("claim_ids", [])))
-            out.append(f"- [{ids}] {_line(r.get('hypothesis', ''))} — {_line(r.get('task_idea', ''))}")
-        out.append("")
-
-    notes = a.get("security_notes") or []
-    if notes:
-        out += [f"## {H['security']}", ""]
-        for n in notes:
-            loc = f" {_code(n['location'])}" if n.get("location") else ""
-            out.append(f"- {_item(n.get('observation', ''))}{loc} — {_line(n.get('handling', ''))}")
-        out.append("")
-
-    con = a.get("conclusion") or {}
-    out += [f"## {H['conclusion']}", ""]
-    out.append("**" + " / ".join(_line(L.get(v, v)) for v in con.get("verdicts", [])) + "**")
+    for r in _dicts(ex.get("recommended")):
+        targets = H["sep"].join(H["q"].format(quotes[i]) if quotes.get(i) else str(i) for i in _strings(r.get("claim_ids")))
+        tail = f"（{H['target_claims']}{H['colon']}{_line(targets)}）" if lang == "ja" else f" ({H['target_claims']}{H['colon']}{_line(targets)})"
+        line = " ".join(x for x in [_line(r.get("hypothesis", "")), _sentence(H["task_idea"], r.get("task_idea"), H)] if x)
+        out.append(f"- {line}{tail if targets else ''}")
     out.append("")
-    out += _bullets(con.get("reasons"), H["none"]) + [""]
+
+    notes = _dicts(a.get("security_notes"))
+    out += [f"## {H['concerns']}", ""]
+    if not notes:
+        out.append(f"- {H['none']}")
+    for n in notes:
+        parts = [_item(n.get("observation", "")), _line(n.get("handling", "")), _evidence([n.get("location")] if n.get("location") else [], H, lang)]
+        out.append("- " + " ".join(p for p in parts if p))
+    out.append("")
+
+    auditor = _field(a, "auditor")
+    out += [f"## {H['conditions_limits']}", "", f"### {H['conditions']}", ""]
+    kind = prov.get("kind")
+    rows = [
+        ("input", _code(prov.get("input")) if prov.get("input") else None),
+        ("kind", _line(L[f"kind.{kind}"]) if f"kind.{kind}" in L else (_code(kind) if kind else None)),
+        ("repo", _code(prov.get("repo_url")) if prov.get("repo_url") else None),
+        ("commit", _code(prov.get("commit")) if prov.get("commit") else None),
+        ("dirty", L.get(f"dirty.{prov.get('dirty')}") if prov.get("dirty") is not None else None),
+        ("skill_subpath", _code(prov.get("skill_subpath")) if prov.get("skill_subpath") else None),
+        ("fetched_at", _code(prov.get("fetched_at")) if prov.get("fetched_at") else None),
+        ("fingerprint", _code(inv.get("fingerprint")) if inv.get("fingerprint") else None),
+        ("model", _code(auditor.get("model")) if auditor.get("model") else None),
+        ("runtime", _line(auditor.get("runtime")) if auditor.get("runtime") else None),
+        ("date", _code(auditor.get("date")) if auditor.get("date") else None),
+    ]
+    out += [f"- {H[k]}{H['colon']}{v}" for k, v in rows if v] + [""]
     if a.get("limitations"):
         out += [f"### {H['limitations']}", ""] + _bullets(a["limitations"], H["none"]) + [""]
-    if a.get("not_reviewed"):
-        out += [f"### {H['not_reviewed']}", ""] + [f"- {_code(n['path'])}: {_line(n['reason'])}" for n in a["not_reviewed"]] + [""]
+    not_reviewed = _dicts(a.get("not_reviewed"))
+    if not_reviewed:
+        out += [f"### {H['not_reviewed']}", ""] + [f"- {_code(n.get('path'))}{H['colon']}{_line(n.get('reason'))}" for n in not_reviewed] + [""]
+
+    if claims:
+        out += [f"## {H['tally']}", "", f"| {H['axis']} | {H['value']} | {H['count']} |", "|---|---|---|"]
+        for x in AXES:
+            counts = Counter(_field(c, "assessment").get(x) for c in claims)
+            for v in AXES[x]:
+                if counts.get(v):
+                    out.append(f"| {H[f'axis_{x}']} | {_cell(lab(v, f'{x}.' if x != 'unique_value' else ''))} | {counts[v]} |")
+        out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 

@@ -106,13 +106,27 @@ class ReportTest(unittest.TestCase):
     def test_valid_audit_passes_and_renders(self):
         self.assertEqual(self.errors(VALID), [])
         md = report.render(self.audit, "ja")
-        for heading in ("## Summary", "## Implementation", "## Claims", "## Necessity", "## Experimental Results", "## Conclusion"):
-            self.assertIn(heading, md)
-        self.assertIn("実験未実施", md)
-        self.assertIn("判定の集計", md)
-        self.assertIn("宣伝との整合", md)
-        self.assertIn("fingerprint", md)
-        self.assertIn("Claims", report.render(self.audit, "en"))
+        headings = [ln for ln in md.splitlines() if ln.startswith("## ")]
+        self.assertEqual(headings, ["## 結論", "## 要約", "## このスキルがしていること", "## 宣伝の確認", "## スキルなしで足りるか",
+                                    "## 実験", "## 気になった点", "## 監査の条件と限界", "## 付録: 判定の集計"])
+        lines = md.splitlines()
+        self.assertEqual(lines[2:7], ["## 結論", "", "独自の価値はあるが効果は未確認", "", "- script exists, effect not measured"])
+        self.assertIn("| CSV profile | スキル固有の価値あり（実装で確認） | 高 |", lines)
+        self.assertIn("根拠: `scripts/csv_profile.py` 1〜3行、`SKILL.md` 2行", lines)
+        self.assertIn("### 「profiles CSV」", lines)
+        self.assertIn("> 出典: `README.md` 1行", lines)
+        for sentence in ("- 仕組み: 実装を確認できた。", "- 効果: 測定はない。", "- 宣伝の強さ: 実装と根拠に見合っている。",
+                         "- 代わりになるか: スキル固有の価値あり（推測）。", "- 確かさ: 中。"):
+            self.assertIn(sentence, lines)
+        self.assertIn("対照実験はしていない", md)
+        self.assertIn("（対象の宣伝: 「profiles CSV」）", md)
+        self.assertIn("- ファイルの指紋: `", md)
+        for raw in ("F1", "C1", "fingerprint", "kind", "input:", "unique_value_unverified", "**"):
+            self.assertNotIn(raw, md)
+        en = report.render(self.audit, "en")
+        self.assertIn("## Checking the claims", en)
+        self.assertIn("- Effect: not measured.", en)
+        self.assertIn("Evidence: `scripts/csv_profile.py` lines 1–3; `SKILL.md` line 2", en)
 
     def test_location_out_of_range_is_error(self):
         d = copy.deepcopy(VALID)
@@ -254,6 +268,8 @@ class ReportTest(unittest.TestCase):
         d = self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")
         d["minimal_prompt"]["text"] = "Do this:\n```\n# Conclusion\n````"
         d["features"][0]["name"] = "a\n## Fake | x"
+        d["claims"][0]["quote"] = "q <img src=y>\n# fake heading " + "x" * 80
+        d["claims"][0]["source"] = "README.md:1"
         d["conclusion"]["reasons"] = ["## Fake conclusion", "line\n\n# injected <b>"]
         self.assertEqual(self.errors(d), [])
         md = report.render(self.audit, "en")
@@ -267,9 +283,11 @@ class ReportTest(unittest.TestCase):
         self.assertIn("| a |\n|---|\n| 1 |\n&lt;img src=x onerror=alert(1)&gt;", md)
         i = lines.index("`````text")
         self.assertEqual(lines[i + 1:i + 6], ["Do this:", "```", "# Conclusion", "````", "`````"])
-        self.assertIn("| F1 a<br>## Fake \\| x |", md)
+        self.assertIn("| a<br>## Fake \\| x | Has skill-specific value (confirmed in code) | high |", md)
         self.assertIn("- \\## Fake conclusion", lines)
         self.assertIn("- line # injected &lt;b&gt;", lines)
+        self.assertIn("### “q &lt;img src=y&gt; # fake heading " + "x" * 30 + "…”", lines)
+        self.assertIn("> “q &lt;img src=y&gt; # fake heading " + "x" * 80 + "”", lines)
         self.assertFalse([ln for ln in lines if ln.lstrip("#").startswith((" Fake", " fake", " injected"))])
 
     def test_locations_with_backticks_render_as_code(self):

@@ -15,6 +15,7 @@ SCRIPTS = SKILL_ROOT / "scripts"
 SKILLS = ROOT / "tests" / "fixtures" / "skills"
 sys.path.insert(0, str(SCRIPTS))
 
+import _common  # noqa: E402
 import inventory  # noqa: E402
 from _common import parse_frontmatter, resolve_location, split_lines, write_json  # noqa: E402
 from inventory import build_inventory  # noqa: E402
@@ -307,10 +308,10 @@ class HostileInputTests(unittest.TestCase):
     def test_regexes_are_linear_on_hostile_lines(self):
         rules = dict(inventory.INJECTION_RES)
         cases = [
-            (inventory.URL_RE, "a." * 25000),
-            (inventory.MD_LINK_RE, "[" * 50000),
-            (inventory.MD_LINK_RE, "[](a" * 12500),
-            (inventory.INVOKE_RE, "-a=sh " * 8000),
+            (_common.URL_RE, "a." * 25000),
+            (_common.MD_LINK_RE, "[" * 50000),
+            (_common.MD_LINK_RE, "[](a" * 12500),
+            (_common.INVOKE_RE, "-a=sh " * 8000),
             (rules["addresses_auditor"], "auditor " * 6000),
             (rules["addresses_auditor"], "reviewer " * 6000),
             (rules["ignore_instructions"], "ignore" + " " * 50000 + "x"),

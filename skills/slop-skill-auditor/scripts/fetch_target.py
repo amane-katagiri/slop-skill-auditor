@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import PROVENANCE_SCHEMA, SKIP_DIRS, is_repo_doc, write_json  # noqa: E402
+from _common import EXTERNAL_MAX_FILES, PROVENANCE_SCHEMA, SKIP_DIRS, is_repo_doc, skill_externals, write_json  # noqa: E402
 
 EXIT_ERROR = 2
 EXIT_AMBIGUOUS = 3
@@ -226,6 +226,15 @@ def copy_repo_docs(root, dst, skill_rel, skipped, budget):
                 copy_entry(os.path.join(dirpath, f), os.path.join(dst, rel), rel, skipped, budget)
 
 
+def record_externals(prov, root, skill_sub, skill_dir):
+    closure, plugin = skill_externals(root, skill_sub, skill_dir, EXTERNAL_MAX_FILES)
+    prov["plugin_root"] = plugin["root"] if plugin else None
+    prov["external_files"] = sorted(({"path": p, "reason": r} for p, r in closure["external"].items()), key=lambda e: e["path"])
+    if closure["truncated"]:
+        prov["notes"].append("more than %d files outside the skill directory are referenced; the rest were left out" % EXTERNAL_MAX_FILES)
+    return [e["path"] for e in prov["external_files"]]
+
+
 def read_small(path, limit):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
@@ -416,7 +425,7 @@ def fetch(args):
         "schema": PROVENANCE_SCHEMA, "input": args.input, "kind": None, "repo_url": None,
         "ref_requested": args.ref, "commit": None, "dirty": None, "source_root": None,
         "skill_subpath": None, "skill_dir_name": None, "candidates": [], "candidates_relative_to": "source_root",
-        "docs": [], "skipped": [], "notes": [],
+        "docs": [], "skipped": [], "notes": [], "external_files": [], "plugin_root": None,
         "fetched_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "tools": tool_versions(),
     }
@@ -462,6 +471,7 @@ def fetch(args):
         else:
             prov["skill_subpath"] = rel_join(path, sub)
             prov["skill_dir_name"] = gh["repo"] if prov["skill_subpath"] == "." else os.path.basename(prov["skill_subpath"])
+            record_externals(prov, source, prov["skill_subpath"], os.path.join(source, prov["skill_subpath"]))
     else:
         target = os.path.abspath(args.input)
         if os.path.isfile(target):
@@ -484,7 +494,7 @@ def fetch(args):
             raise FetchError("no such file or directory: %s" % args.input)
         if not ambiguous:
             git_root = find_git_root(skill_dir)
-            copy_root = git_root or skill_dir
+            copy_root = git_root or (target if prov["kind"] == "local_dir" else skill_dir)
             skill_rel = os.path.relpath(skill_dir, copy_root).replace(os.sep, "/")
             if git_root:
                 prov["commit"] = local_git_info(git_root, prov["notes"])
@@ -493,6 +503,9 @@ def fetch(args):
                 copy_tree(skill_dir, os.path.join(source, skill_rel), skill_rel, prov["skipped"], budget)
                 if skill_rel != ".":
                     copy_repo_docs(copy_root, source, skill_rel, prov["skipped"], budget)
+                for rel in record_externals(prov, copy_root, skill_rel, os.path.join(source, skill_rel)):
+                    if not os.path.lexists(os.path.join(source, rel)):
+                        copy_file(os.path.join(copy_root, rel), os.path.join(source, rel), budget)
             except (FetchError, OSError):
                 shutil.rmtree(source, ignore_errors=True)
                 raise
@@ -542,6 +555,10 @@ def main(argv=None):
         print("other skills in source: %d" % (len(prov["candidates"]) - 1))
     for d in prov["docs"]:
         print("doc:       %s -> %s" % (d["input"], d["saved_as"]))
+    if prov["plugin_root"]:
+        print("plugin:    %s" % prov["plugin_root"])
+    for e in prov["external_files"]:
+        print("external:  %s (%s)" % (e["path"], e["reason"]))
     for s in prov["skipped"]:
         print("skipped:   %s (%s)" % (s["path"], s["reason"]))
     for n in prov["notes"]:

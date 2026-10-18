@@ -6,12 +6,13 @@ import posixpath
 import re
 import stat
 import sys
-from collections import Counter, deque
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (  # noqa: E402
-    INVENTORY_SCHEMA, SKIP_DIRS, TEXT_MAX_BYTES, decode_text, dump_json, is_repo_doc, is_script_file, load_json,
-    parse_frontmatter, sha256_file, skill_label, split_lines, write_json,
+    INVENTORY_SCHEMA, LINE_SCAN_MAX, MD_EXTS, PLUGIN_DIR, SKIP_DIRS, TEXT_MAX_BYTES, code_fence_map, collect_refs,
+    decode_text, dump_json, is_repo_doc, is_review_seed, is_script_path, load_json, parse_frontmatter, plugin_scan,
+    reference_closure, scan_lines, sha256_file, skill_label, source_lines, split_lines, walk_files, write_json,
 )
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -22,28 +23,6 @@ KNOWN_KEYS = {
 }
 BODY_MAX_LINES = 500
 EXCERPT_MAX = 160
-FILE_EXTS = {
-    "md", "markdown", "txt", "rst", "py", "sh", "bash", "zsh", "fish", "ps1", "js", "mjs", "cjs", "ts", "tsx", "jsx",
-    "json", "jsonl", "yaml", "yml", "toml", "ini", "cfg", "conf", "csv", "tsv", "xml", "html", "htm", "css", "scss",
-    "sql", "rb", "go", "rs", "java", "kt", "swift", "c", "h", "cc", "cpp", "hpp", "lua", "pl", "php", "r",
-    "ipynb", "pdf", "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "docx", "xlsx", "pptx", "zip", "tar", "gz",
-    "tmpl", "tpl", "j2", "jinja", "mustache", "hbs", "env", "lock", "dockerfile", "mdx", "proto", "graphql", "wasm",
-}
-LINE_SCAN_MAX = 4000
-URL_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]{0,31}://[^\s<>\"'`)\]]+")
-MD_LINK_RE = re.compile(r"!?\[[^\[\]\n]*\]\(\s*<?([^)\s>\[]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
-BACKTICK_RE = re.compile(r"`([^`\n]+)`")
-INVOKE_RE = re.compile(
-    r"(?=(?<![\w./-])(?:python3?|bash|sh|zsh|node|deno run|bun|ruby|perl|uv run|npx|pwsh|source|\.)\s+"
-    r"(?:-[\w-]+(?:=\S+)?\s+){0,8}([^\s`'\"|;&<>()]+))"
-)
-INCLUDE_RE = re.compile(r"(?:^|(?<=[\s(\[]))@([\w.~/-]+)")
-BARE_RE = re.compile(r"(?<![\w/.@`~$-])((?:\.{1,2}/)?[\w.-]+(?:/[\w.-]+)+)")
-BARE_NAME_RE = re.compile(
-    r"(?<![\w/.@`~$<-])([\w-][\w.-]*\.(?:%s))(?![\w/.>-])" % "|".join(sorted(FILE_EXTS, key=len, reverse=True)), re.I)
-LINE_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?$")
-REF_KIND_ORDER = ["markdown_link", "invocation", "include", "backtick", "bare_path"]
-
 INDICATOR_RES = [
     ("url", re.compile(r"\bhttps?://[^\s<>\"'`)\]]+")),
     ("mcp_tool", re.compile(r"\bmcp__\w+|\bMCP\s+server", re.I)),
@@ -61,7 +40,6 @@ INDICATOR_RES = [
         r"\byarn\s+add\b|\buv\s+(?:add|pip\s+install|tool\s+install)\b|\bbrew\s+install\b|\bapt(?:-get)?\s+install\b|"
         r"\bcargo\s+install\b|\bgo\s+install\b|\bgem\s+install\b|\bnpx\s+-y\b|\bpipx\s+install\b")),
 ]
-MD_EXTS = (".md", ".markdown", ".mdx")
 SHELL_LANGS = {"bash", "sh", "shell", "console", "zsh", "shell-session", "terminal"}
 INJECTION_RES = [
     ("ignore_instructions", re.compile(
@@ -84,22 +62,6 @@ IMPERATIVE_RE = re.compile(r"\b(?:ignore|must|should|do not|don't|run|execute|ra
 def excerpt(text):
     text = text.strip()
     return text if len(text) <= EXCERPT_MAX else text[: EXCERPT_MAX - 1] + "…"
-
-
-def walk_files(root):
-    entries = []
-    dirs = set()
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d != ".git")
-        rel_dir = os.path.relpath(dirpath, root)
-        if rel_dir != ".":
-            dirs.add(rel_dir.replace(os.sep, "/"))
-        for d in dirnames:
-            if os.path.islink(os.path.join(dirpath, d)):
-                entries.append(os.path.normpath(os.path.join(rel_dir, d)).replace(os.sep, "/"))
-        for f in filenames:
-            entries.append(os.path.normpath(os.path.join(rel_dir, f)).replace(os.sep, "/"))
-    return sorted(entries), dirs
 
 
 def describe_file(root, rel):
@@ -134,26 +96,6 @@ def describe_file(root, rel):
     return info, lines
 
 
-def code_fence_map(lines):
-    blocks, inside = [], set()
-    fence = None
-    for idx, ln in enumerate(lines, 1):
-        s = ln.lstrip()
-        m = re.match(r"^(`{3,}|~{3,})(.*)$", s)
-        if fence is None:
-            if m:
-                fence = (m.group(1), (m.group(2).strip().split() or [""])[0].strip("{}.").lower(), idx)
-                inside.add(idx)
-        else:
-            inside.add(idx)
-            if m and m.group(1)[0] == fence[0][0] and len(m.group(1)) >= len(fence[0]) and not m.group(2).strip():
-                blocks.append((fence[1], fence[2], idx))
-                fence = None
-    if fence is not None:
-        blocks.append((fence[1], fence[2], len(lines)))
-    return blocks, inside
-
-
 def skill_md_facts(lines, fm, fences=None):
     blocks, inside = fences or code_fence_map(lines)
     headings = []
@@ -172,92 +114,6 @@ def skill_md_facts(lines, fm, fences=None):
         "headings": headings,
         "code_blocks": [{"lang": b[0] or None, "line_start": b[1], "line_end": b[2]} for b in blocks],
     }
-
-
-def clean_target(raw, top_dirs):
-    t = raw.strip().strip("\"'")
-    t = t.rstrip(".,;:)!?]")
-    t = LINE_SUFFIX_RE.sub("", t)
-    t = t.split("#", 1)[0].split("?", 1)[0]
-    if not t or URL_RE.match(t) or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", t):
-        return None
-    if t.startswith(("/", "~", "$", "-", "@")) or re.search(r"[<>{}$*?|\\\[\]=]", t):
-        return None
-    while t.startswith("./"):
-        t = t[2:]
-    if not t or t in (".", ".."):
-        return None
-    return t
-
-
-def path_like(t, top_dirs, strict):
-    last = t.rstrip("/").rsplit("/", 1)[-1]
-    ext = last.rsplit(".", 1)[-1].lower() if "." in last.strip(".") else ""
-    if ext in FILE_EXTS:
-        return True
-    first = t.split("/", 1)[0]
-    if "/" in t and (first in top_dirs or first == ".."):
-        return True
-    if not strict and t.endswith("/") and t.count("/") >= 1 and re.match(r"^[\w.-]+(/[\w.-]+)*/$", t):
-        return True
-    return False
-
-
-def extract_refs(rel, lines, top_dirs, fenced=frozenset()):
-    found = {}
-
-    def add(lineno, raw, kind, strict=True):
-        t = clean_target(raw, top_dirs)
-        if t is None or not path_like(t, top_dirs, strict):
-            return
-        key = (lineno, t)
-        if key not in found or REF_KIND_ORDER.index(kind) < REF_KIND_ORDER.index(found[key]):
-            found[key] = kind
-
-    for idx, ln in enumerate(lines, 1):
-        for m in MD_LINK_RE.finditer(ln):
-            add(idx, m.group(1), "markdown_link", strict=False)
-        no_url = URL_RE.sub(" ", ln)
-        for m in INVOKE_RE.finditer(no_url):
-            add(idx, m.group(1), "invocation")
-        for m in INCLUDE_RE.finditer(no_url):
-            add(idx, m.group(1), "include")
-        for m in BACKTICK_RE.finditer(no_url):
-            toks = m.group(1).split()
-            if toks:
-                add(idx, toks[0], "backtick")
-        if idx not in fenced:
-            for m in BARE_RE.finditer(no_url):
-                add(idx, m.group(1), "bare_path")
-            for m in BARE_NAME_RE.finditer(no_url):
-                add(idx, m.group(1), "bare_path")
-    return [{"from": rel, "line": k[0], "target": k[1], "kind": v} for k, v in sorted(found.items())]
-
-
-def resolve_ref(ref, files, dirs, lower_map, base_map):
-    from_dir = posixpath.dirname(ref["from"])
-    target = ref["target"]
-    is_dir_ref = target.endswith("/")
-    options = []
-    for base in ([from_dir, ""] if from_dir else [""]):
-        p = posixpath.normpath(posixpath.join(base, target))
-        if p == ".." or p.startswith("../"):
-            continue
-        if p not in options:
-            options.append(p)
-    for p in options:
-        if (p in files and not is_dir_ref) or p in dirs:
-            return p, True, "path"
-    if not is_dir_ref:
-        for p in options:
-            hits = lower_map.get(p.lower(), [])
-            if len(hits) == 1:
-                return hits[0], True, "case_insensitive"
-        if "/" not in target:
-            hits = base_map.get(target.lower(), [])
-            if len(hits) == 1:
-                return hits[0], True, "basename"
-    return (options[0] if options else None), False, None
 
 
 def scan_indicators(rel, lines, blocks=()):
@@ -315,7 +171,8 @@ NON_SKILL_DIRS = {"tests", "test", "fixtures", "examples"}
 MISSING_SCOPE = (
     "only references made from review_targets (SKILL.md, files reachable from it, files under scripts/ or bin/, executables, "
     "root README*); files inside any tests/, test/, fixtures/ or examples/ directory are excluded unless reachable from "
-    "SKILL.md; slash-less backtick/bare_path targets are never reported as missing"
+    "SKILL.md; slash-less backtick/bare_path targets are never reported as missing; targets outside the skill directory that "
+    "exist in the source tree are resolved as scope 'external' (@repo/...) instead"
 )
 TOKEN_METHOD = "chars/4 for ASCII-dominant text, chars/1.5 for CJK-dominant text (estimate only)"
 
@@ -338,7 +195,7 @@ def cost_of(texts):
 
 
 def is_script(info):
-    return is_script_file(info["path"], info["executable"], info["shebang"]) or info["path"].split("/", 1)[0] in ("scripts", "bin")
+    return is_script_path(info["path"], info["executable"], info["shebang"])
 
 
 def spec_checks(fm, skill_md, dir_name):
@@ -381,8 +238,6 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
     skill_root = os.path.abspath(skill_root)
     dir_name = dir_name or os.path.basename(skill_root.rstrip(os.sep))
     paths, dirs = walk_files(skill_root)
-    file_set = set(paths)
-    top_dirs = {d.split("/", 1)[0] for d in dirs}
     files, texts = [], {}
     for rel in paths:
         info, lines = describe_file(skill_root, rel)
@@ -396,48 +251,40 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
     fm = parse_frontmatter(skill_text)
     skill_md = skill_md_facts(skill_lines, fm, fences["SKILL.md"]) if skill_lines is not None else None
 
-    lower_map, base_map = {}, {}
-    for p in paths:
-        lower_map.setdefault(p.lower(), []).append(p)
-        base_map.setdefault(posixpath.basename(p).lower(), []).append(p)
     scan, truncated = {}, []
     for rel in sorted(texts):
-        long_lines = [i for i, ln in enumerate(texts[rel], 1) if len(ln) > LINE_SCAN_MAX]
+        scan[rel], long_lines = scan_lines(texts[rel])
         if long_lines:
             truncated.append({"path": rel, "count": len(long_lines), "first_line": long_lines[0]})
-            scan[rel] = [ln[:LINE_SCAN_MAX] for ln in texts[rel]]
-        else:
-            scan[rel] = texts[rel]
-    references = []
-    for rel in sorted(texts):
-        fenced = fences[rel][1] if rel in fences else frozenset()
-        for ref in extract_refs(rel, scan[rel], top_dirs, fenced):
-            ref["resolved"], ref["exists"], ref["resolution"] = resolve_ref(ref, file_set, dirs, lower_map, base_map)
-            if ref["kind"] == "bare_path" and "/" not in ref["target"] and not ref["exists"]:
-                continue
-            references.append(ref)
+    references = collect_refs(paths, dirs, texts)
 
-    under = {}
-    for p in paths:
-        parts = p.split("/")
-        for i in range(1, len(parts)):
-            under.setdefault("/".join(parts[:i]), []).append(p)
-    reachable = set()
-    queue = deque(["SKILL.md"] if "SKILL.md" in file_set else [])
-    seen = set(queue)
-    by_from = {}
-    for ref in references:
-        if ref["exists"]:
-            by_from.setdefault(ref["from"], []).append(ref["resolved"])
-    while queue:
-        cur = queue.popleft()
-        for res in by_from.get(cur, []):
-            hits = [res] if res in file_set else under.get(res, [])
-            for h in hits:
-                reachable.add(h)
-                if h not in seen:
-                    seen.add(h)
-                    queue.append(h)
+    info_by_path = {f["path"]: f for f in files}
+    seeds = [p for p in paths if is_review_seed(p, info_by_path[p]["executable"], info_by_path[p]["shebang"])]
+    plugin = None
+    if provenance is not None:
+        root, skill_sub = os.path.join(audit_dir, provenance["source_root"]), provenance["skill_subpath"]
+        prel = provenance.get("plugin_root")
+        if prel and os.path.isdir(os.path.join(root, prel, PLUGIN_DIR)) and not os.path.islink(os.path.join(root, prel, PLUGIN_DIR)):
+            plugin = plugin_scan(root, prel)
+    else:
+        root, skill_sub = skill_root, "."
+    closure = reference_closure(root, skill_sub, paths, dirs, references, seeds, plugin["files"] if plugin else ())
+    reachable = closure["reachable"]
+
+    external_files, ext_texts = [], {}
+    for p, reason in closure["external"].items():
+        lines = source_lines(root, p)
+        full = os.path.join(root, p)
+        st = os.lstat(full)
+        loc = "@repo/" + p
+        entry = {"path": loc, "reason": reason, "size": st.st_size, "sha256": sha256_file(full),
+                 "kind": "text" if lines or st.st_size == 0 else "binary", "lines": len(lines) if lines is not None else None}
+        if entry["kind"] == "binary":
+            entry["lines"] = None
+        else:
+            ext_texts[loc] = lines
+        external_files.append(entry)
+    external_files.sort(key=lambda e: e["path"])
 
     def exempt(p):
         base = posixpath.basename(p).upper()
@@ -445,9 +292,9 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
 
     unreferenced = [p for p in paths if p not in reachable and not exempt(p)]
 
-    info_by_path = {f["path"]: f for f in files}
     reach_text = sorted(p for p in reachable if p in texts and p != "SKILL.md")
     reach_scripts = [p for p in reach_text if is_script(info_by_path[p])]
+    ext_text = sorted(ext_texts)
     desc_val = (fm["parsed"] or {}).get("description") if isinstance(fm["parsed"], dict) else None
     context_cost = {
         "method": TOKEN_METHOD,
@@ -455,12 +302,13 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
         "frontmatter_description": cost_of([desc_val] if isinstance(desc_val, str) else []),
         "reachable_text": dict(files=reach_text, **cost_of("\n".join(texts[p]) for p in reach_text)),
         "scripts": dict(files=reach_scripts, **cost_of("\n".join(texts[p]) for p in reach_scripts)),
+        "external_text": dict(files=ext_text, **cost_of("\n".join(ext_texts[p]) for p in ext_text)),
     }
     review_targets = sorted(
         p for p in paths
         if p == "SKILL.md" or p in reachable or is_script(info_by_path[p])
         or ("/" not in p and p.upper().startswith("README"))
-    )
+    ) + [e["path"] for e in external_files]
 
     missing = {}
     missing_from = {
@@ -481,9 +329,15 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
     for rel in sorted(texts):
         indicators.extend(scan_indicators(rel, scan[rel], fences[rel][0] if rel in fences else ()))
         injections.extend(scan_injection(rel, scan[rel], "\n".join(texts[rel])))
+    for loc in ext_text:
+        lines = scan_lines(ext_texts[loc])[0]
+        blocks = code_fence_map(ext_texts[loc])[0] if loc.lower().endswith(MD_EXTS) else ()
+        indicators.extend(scan_indicators(loc, lines, blocks))
+        injections.extend(scan_injection(loc, lines, "\n".join(ext_texts[loc])))
     indicators.sort(key=lambda x: (x["path"], x["line"], x["kind"]))
 
-    fingerprint = hashlib.sha256("".join("%s\t%s\n" % (f["path"], f["sha256"]) for f in files).encode()).hexdigest()
+    fingerprint = hashlib.sha256(("".join("%s\t%s\n" % (f["path"], f["sha256"]) for f in files)
+                                  + "".join("%s\t%s\n" % (e["path"], e["sha256"]) for e in external_files)).encode()).hexdigest()
 
     inv = {
         "schema": INVENTORY_SCHEMA,
@@ -497,6 +351,9 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
         "missing_references": [missing[k] for k in sorted(missing)],
         "missing_references_scope": MISSING_SCOPE,
         "unreferenced_files": unreferenced,
+        "external_files": external_files,
+        "external_references": closure["external_refs"],
+        "external_truncated": closure["truncated"],
         "external_indicators": indicators,
         "injection_candidates": injections,
         "truncated_lines": {"max_chars": LINE_SCAN_MAX, "files": truncated},
@@ -504,6 +361,9 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
         "context_cost": context_cost,
         "review_targets": review_targets,
     }
+    if plugin is not None:
+        inv["plugin"] = {"root": plugin["root"], "manifests": plugin["manifests"], "hooks": plugin["hooks"],
+                         "mcp_servers": plugin["mcp_servers"]}
     if provenance is not None:
         inv["source_context"] = source_context(audit_dir, provenance)
     return inv
@@ -548,6 +408,17 @@ def summary(inv):
                                             " " + f["shebang"] if f["shebang"] else ""))
     for m in inv["missing_references"]:
         out.append("missing ref: %s (first at %s:%d, %dx)" % (m["target"], m["from"], m["line"], m["count"]))
+    for e in inv["external_files"]:
+        out.append("external:    %s (%s)" % (e["path"], e["reason"]))
+    if inv["external_truncated"]:
+        out.append("external:    more files outside the skill are referenced than were followed")
+    plugin = inv.get("plugin")
+    if plugin:
+        out.append("plugin:      %s (%d manifests)" % (plugin["root"], len(plugin["manifests"])))
+        for h in plugin["hooks"]:
+            out.append("  hook %s [%s]: %s" % (h["event"], h["matcher"] or "*", (h["command"] or h["type"] or "-")[:120]))
+        for s in plugin["mcp_servers"]:
+            out.append("  mcp %s: %s" % (s["name"], " ".join(x for x in [s["command"] or s["url"] or "-"] + s["args"])[:120]))
     if inv["unreferenced_files"]:
         out.append("unreferenced: %s" % ", ".join(inv["unreferenced_files"]))
     counts = Counter(i["kind"] for i in inv["external_indicators"])
@@ -568,9 +439,11 @@ def summary(inv):
         out.append("context:     %d other skills, %d repo docs, %d user docs" % (
             len(ctx["other_skills"]), len(ctx["repo_docs"]), len(ctx["user_docs"])))
     cc = inv["context_cost"]
-    out.append("cost:        SKILL.md ~%d tokens, description ~%d tokens, reachable files ~%d tokens in %d files (scripts ~%d) (estimate)" % (
-        cc["skill_md"]["est_tokens"], cc["frontmatter_description"]["est_tokens"], cc["reachable_text"]["est_tokens"],
-        len(cc["reachable_text"]["files"]), cc["scripts"]["est_tokens"]))
+    out.append("cost:        SKILL.md ~%d tokens, description ~%d tokens, reachable files ~%d tokens in %d files (scripts ~%d), "
+               "outside the skill ~%d tokens in %d files (estimate)" % (
+                   cc["skill_md"]["est_tokens"], cc["frontmatter_description"]["est_tokens"], cc["reachable_text"]["est_tokens"],
+                   len(cc["reachable_text"]["files"]), cc["scripts"]["est_tokens"], cc["external_text"]["est_tokens"],
+                   len(cc["external_text"]["files"])))
     out.append("review targets: %d (%s)" % (len(inv["review_targets"]), ", ".join(inv["review_targets"])))
     out.append("fingerprint: %s" % inv["fingerprint"])
     return "\n".join(out)
