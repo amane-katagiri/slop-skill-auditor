@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 
 from _common import sha256_file
@@ -110,3 +111,51 @@ def copy_tree(src: Path, dst: Path, exclude_skills: bool = False, skip_names=(),
     # symlinks=True copies links as links so an agent-created link to e.g. ~/.ssh is never followed.
     shutil.copytree(src, dst, symlinks=True, ignore=ign, dirs_exist_ok=True)
     return skipped
+
+
+class UnsafeDestination(Exception):
+    pass
+
+
+def safe_mkdirs(root: Path, rel: Path) -> Path:
+    cur = root
+    for part in rel.parts:
+        if part == ".":
+            continue
+        cur = cur / part
+        try:
+            st = cur.lstat()
+        except FileNotFoundError:
+            cur.mkdir()
+            continue
+        if not stat.S_ISDIR(st.st_mode):
+            raise UnsafeDestination(f"{cur.relative_to(root).as_posix()} is a symlink or not a directory")
+    return cur
+
+
+def safe_copy_file(src: Path, root: Path, rel: Path) -> None:
+    parent = safe_mkdirs(root, rel.parent)
+    dst = parent / rel.name
+    try:
+        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        raise UnsafeDestination(f"{rel.as_posix()}: cannot write ({e.strerror}; symlink or directory in the way)") from None
+    with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+        shutil.copyfileobj(inp, out)
+        os.fchmod(out.fileno(), stat.S_IMODE(os.stat(src).st_mode))
+
+
+def safe_overlay(src: Path, root: Path, rel_dst: Path = Path(".")) -> None:
+    for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+        rel_dir = rel_dst / Path(dirpath).relative_to(src)
+        safe_mkdirs(root, rel_dir)
+        for name in sorted(dirnames + filenames):
+            p = Path(dirpath) / name
+            if p.is_symlink():
+                try:
+                    os.symlink(os.readlink(p), root / rel_dir / name)
+                except FileExistsError:
+                    raise UnsafeDestination(f"{(rel_dir / name).as_posix()} already exists; refusing to replace it with a symlink") from None
+            elif p.is_file():
+                safe_copy_file(p, root, rel_dir / name)
+        dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]

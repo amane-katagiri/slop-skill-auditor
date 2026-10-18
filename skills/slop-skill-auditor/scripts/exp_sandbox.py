@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import resource
 import shutil
 import signal
 import subprocess
@@ -21,6 +22,7 @@ ENV_ALLOW = (
 AUTH_ENV = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 FAKE_BACKEND = Path(__file__).resolve().parents[3] / "tests" / "fake_backend.py"
 OUTPUT_READ_LIMIT = 1 << 20
+COMMAND_FSIZE_LIMIT = 64 << 20
 TOOLS_DIR = Path(__file__).resolve().parent
 TOOLS_MOUNT_NAME = ".slop-tools"
 REQUIRED_LAUNCH_FLAGS = ("--strict-mcp-config", "--no-session-persistence")
@@ -70,18 +72,23 @@ def make_workdir(prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=workdir_base())).resolve()
 
 
+class FileSizeLimitExceeded(Exception):
+    pass
+
+
 def read_capped(f, limit: int, tail: bool = False) -> str:
     size = f.seek(0, os.SEEK_END)
     f.seek(max(0, size - limit) if tail else 0)
     return f.read(limit).decode("utf-8", "replace")
 
 
-def run_process(argv, stdin_text, cwd, timeout, stdout_path=None, env=None, out_limit=OUTPUT_READ_LIMIT):
+def run_process(argv, stdin_text, cwd, timeout, stdout_path=None, env=None, out_limit=OUTPUT_READ_LIMIT, fsize_limit=None):
     # Output goes to files, not pipes: a descendant that escaped the process group could hold a pipe open forever.
     with (open(stdout_path, "w+b") if stdout_path else tempfile.TemporaryFile()) as out_f, tempfile.TemporaryFile() as err_f:
         proc = subprocess.Popen(
             argv, cwd=cwd, stdin=subprocess.PIPE, stdout=out_f, stderr=err_f,
             env=env if env is not None else child_env(), start_new_session=True,
+            preexec_fn=(lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (fsize_limit, fsize_limit))) if fsize_limit else None,
         )
         lock = threading.Lock()
         done = timed_out = False
@@ -105,6 +112,9 @@ def run_process(argv, stdin_text, cwd, timeout, stdout_path=None, env=None, out_
             with lock:
                 done = True
             timer.cancel()
+        if fsize_limit and not timed_out and (proc.returncode in (-signal.SIGXFSZ, 128 + signal.SIGXFSZ)
+                                              or max(out_f.seek(0, os.SEEK_END), err_f.seek(0, os.SEEK_END)) >= fsize_limit):
+            raise FileSizeLimitExceeded(f"stdout/stderr or a written file reached the {fsize_limit >> 20} MB file size limit")
         out = None if stdout_path else read_capped(out_f, out_limit)
         return proc.returncode, out, read_capped(err_f, out_limit, tail=True), timed_out
 
@@ -161,7 +171,7 @@ def sandbox_env() -> dict:
 
 def sandbox_run(command: str, workdir: Path, timeout: int) -> subprocess.CompletedProcess:
     argv = bwrap_argv(workdir) + ["sh", "-c", command]
-    code, out, err, timed_out = run_process(argv, "", workdir, timeout, env=sandbox_env())
+    code, out, err, timed_out = run_process(argv, "", workdir, timeout, env=sandbox_env(), fsize_limit=COMMAND_FSIZE_LIMIT)
     if timed_out:
         raise subprocess.TimeoutExpired(argv, timeout)
     return subprocess.CompletedProcess(argv, code, out, err)

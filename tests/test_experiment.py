@@ -591,6 +591,45 @@ class ReferenceTests(Base):
         err = ex.apply_reference({"kind": "command", "command": "true"}, self.tmp, self.exp, (False, "bwrap not found"))
         self.assertIn("refusing", err)
 
+    def _symlinked_workdir(self):
+        host = self.tmp / "host"
+        (host / "dir").mkdir(parents=True)
+        (host / "file").write_text("host\n")
+        wd = self.tmp / "wd"
+        (wd / "output" / "deep").mkdir(parents=True)
+        (wd / "notes.txt").write_text("notes\n")
+        (wd / "src").mkdir()
+        (wd / "src" / "x").write_text("ref\n")
+        (wd / "output" / "deep" / "x").symlink_to(host / "file")
+        (wd / "output" / "deep" / "d").symlink_to(host / "dir", target_is_directory=True)
+        return host, wd
+
+    def test_reference_overlay_never_writes_through_symlinks(self):
+        host, wd = self._symlinked_workdir()
+        for name in ("x", "d"):
+            refdir = self.audit / f"ref-{name}"
+            (refdir / "output" / "deep").mkdir(parents=True)
+            if name == "x":
+                (refdir / "output" / "deep" / "x").write_text("pwned\n")
+            else:
+                (refdir / "output" / "deep" / "d").mkdir()
+                (refdir / "output" / "deep" / "d" / "file").write_text("pwned\n")
+            err = ex.apply_reference({"kind": "files", "dir": str(refdir)}, wd, self.exp, (False, ""))
+            self.assertIn("symlink", err)
+        self.assertEqual((host / "file").read_text(), "host\n")
+        self.assertEqual(list((host / "dir").iterdir()), [])
+
+    def test_reference_copy_never_writes_through_symlinks(self):
+        host, wd = self._symlinked_workdir()
+        for ref in ({"kind": "copy", "from": "notes.txt", "to": "output/deep/x"},
+                    {"kind": "copy", "from": "notes.txt", "to": "output/deep/d/file"},
+                    {"kind": "copy", "from": "src", "to": "output/deep/d"}):
+            self.assertIn("symlink", ex.apply_reference(ref, wd, self.exp, (False, "")))
+        self.assertEqual((host / "file").read_text(), "host\n")
+        self.assertEqual(list((host / "dir").iterdir()), [])
+        self.assertIsNone(ex.apply_reference({"kind": "copy", "from": "src", "to": "output/new"}, wd, self.exp, (False, "")))
+        self.assertEqual((wd / "output" / "new" / "x").read_text(), "ref\n")
+
     def test_blind_mixes_references(self):
         self.add_refs(self.init_capability(n=1))
         self.freeze()
@@ -766,6 +805,19 @@ class IsolationTests(Base):
         self.assertFalse(st["hooks_disabled"])
         self.assertIn("hook_fired_project_SessionStart", st["sandbox"]["hooks_fired"])
 
+    def test_selftest_fails_when_probe_skill_does_not_load(self):
+        self.init_capability(n=1)
+        self.assertTrue(ex.do_selftest(self.exp, force=True)["sandbox"]["hook_skill_loaded"])
+        os.environ["FAKE_NO_LOAD"] = "1"
+        st = ex.do_selftest(self.exp, force=True)
+        for mode in ("sandbox", "permissions_only"):
+            self.assertFalse(st[mode]["ok"])
+            self.assertFalse(st[mode]["hook_skill_loaded"])
+            self.assertEqual(st[mode]["reason"], "probe skill did not load; hook test inconclusive")
+        self.assertFalse(st["sandbox_ok"])
+        self.assertFalse(st["file_isolation_ok"])
+        self.assertFalse(st["hooks_disabled"])
+
     def test_deny_dirs_cover_experiment_skill_and_siblings(self):
         self.init_capability(n=1)
         wd = sandbox.make_workdir("slop-trial-")
@@ -869,10 +921,36 @@ class IsolationTests(Base):
         self.assertIn("[removed]", prompt)
 
     def test_activation_ignores_assistant_text_markers(self):
-        parsed = {"tool_uses": [], "texts": ["<command-name>/toy</command-name>", ".claude/skills/toy/"], "user_texts": []}
+        parsed = {"tool_uses": [], "tool_results": {}, "tool_errors": set(),
+                  "texts": ["<command-name>/toy</command-name>", ".claude/skills/toy/"], "user_texts": []}
         self.assertFalse(ex.skill_activation(parsed, "toy")[0])
         parsed["user_texts"] = ["<command-name>/toy</command-name>"]
         self.assertTrue(ex.skill_activation(parsed, "toy")[0])
+
+    def activation_of(self, *calls, user_texts=()):
+        lines = [{"type": "user", "message": {"content": t}} for t in user_texts]
+        for i, (name, inp, result, is_error) in enumerate(calls):
+            lines.append({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"u{i}", "name": name, "input": inp}]}})
+            if result is not None:
+                lines.append({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": f"u{i}", "content": result, "is_error": is_error}]}})
+        path = self.tmp / "t.jsonl"
+        path.write_text("".join(json.dumps(x) + "\n" for x in lines))
+        return ex.skill_activation(ex.parse_stream(path), "toy")[0]
+
+    def test_activation_counts_only_successful_skill_loads(self):
+        md = "/tmp/w/.claude/skills/toy/SKILL.md"
+        self.assertFalse(self.activation_of(("Read", {"file_path": md}, "Permission denied", True)))
+        self.assertFalse(self.activation_of(("Skill", {"skill": "toy"}, "Unknown skill", True)))
+        self.assertFalse(self.activation_of(("Skill", {"skill": "toy"}, None, False)))
+        self.assertFalse(self.activation_of(("Bash", {"command": f"cat {md}"}, "body", False),
+                                            ("Grep", {"pattern": "x", "path": "/tmp/w/.claude/skills/toy"}, "hit", False),
+                                            ("Skill", {"skill": "other", "args": "toy"}, "Launching skill", False)))
+        self.assertFalse(self.activation_of(user_texts=["please look at .claude/skills/toy/SKILL.md\n"]))
+        self.assertTrue(self.activation_of(("Skill", {"skill": "toy"}, "Launching skill", False)))
+        self.assertTrue(self.activation_of(("Skill", {"skill": "plugin:toy"}, "Launching skill", False)))
+        self.assertTrue(self.activation_of(("Read", {"file_path": md}, "---\nname: toy", False)))
+        self.assertTrue(self.activation_of(user_texts=["<command-name>/toy</command-name>"]))
 
     def test_fake_backend_must_be_the_test_backend(self):
         with mock.patch.dict(os.environ, {"SLOP_EXPERIMENT_BACKEND": f"fake:{self.tmp / 'evil.py'}"}):
@@ -930,6 +1008,21 @@ class CheckSandboxTests(unittest.TestCase):
         (self.wd / "n.py").write_text(code)
         r = sandbox.sandbox_run("python3 -I n.py", self.wd, 30)
         self.assertEqual(r.stdout.strip(), "NONET", r.stderr)
+
+    def test_commands_cannot_write_past_the_file_size_limit(self):
+        task = {"checks": [{"id": "flood", "command": "yes | head -c 3000000; true"},
+                           {"id": "file", "command": "head -c 3000000 /dev/zero > big"},
+                           {"id": "small", "command": "head -c 1000 /dev/zero"}],
+                "metrics": [{"id": "m", "direction": "higher", "command": "yes 1 | head -c 3000000"}]}
+        with mock.patch.object(sandbox, "COMMAND_FSIZE_LIMIT", 1 << 20):
+            checks = ex.run_checks(task, self.wd, True, "")
+            metrics = ex.run_metrics(task, self.wd, True, "")
+        self.assertEqual([c["status"] for c in checks], ["file_size_limit", "file_size_limit", "ran"])
+        self.assertEqual([c["passed"] for c in checks], [False, False, True])
+        self.assertIn("1 MB file size limit", checks[0]["reason"])
+        self.assertEqual((self.wd / "big").stat().st_size, 1 << 20)
+        self.assertIn("file size limit", metrics[0]["reason"])
+        self.assertIsNone(metrics[0]["value"])
 
 
 class JudgeTests(unittest.TestCase):

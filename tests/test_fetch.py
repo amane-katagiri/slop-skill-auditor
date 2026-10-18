@@ -2,12 +2,12 @@ import http.server
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -442,14 +442,67 @@ class DocUrlSafetyTests(unittest.TestCase):
                 fetch_target.check_url(url)
         fetch_target.check_url(self.PUBLIC)
 
-    def test_redirect_handler_refuses_unsafe_targets(self):
-        handler = fetch_target.SafeRedirectHandler()
-        req = urllib.request.Request(self.PUBLIC)
-        for url in ["file:///etc/passwd", "http://127.0.0.1/x", "http://169.254.169.254/latest/meta-data/"]:
-            with self.assertRaises(FetchError, msg=url):
-                handler.redirect_request(req, None, 302, "Found", {}, url)
-        self.assertEqual(handler.redirect_request(req, None, 302, "Found", {}, "https://93.184.215.14/y").full_url,
-                         "https://93.184.215.14/y")
+    def serve(self, responses, addrs):
+        connects, wraps = [], []
+
+        def resolve(host, port, **kw):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (addrs.pop(0), port))]
+
+        def connect(addr, timeout=None, source=None):
+            connects.append(addr)
+            with socket.create_server(("127.0.0.1", 0)) as srv:
+                ours = socket.socket()
+                ours.connect(srv.getsockname())
+                theirs = srv.accept()[0]
+            theirs.sendall(responses.pop(0))
+            theirs.close()
+            return ours
+
+        ctx = mock.Mock()
+        ctx.wrap_socket.side_effect = lambda sock, server_hostname=None: wraps.append(server_hostname) or sock
+        patches = [mock.patch.object(fetch_target.socket, "getaddrinfo", side_effect=resolve),
+                   mock.patch.object(fetch_target.socket, "create_connection", side_effect=connect),
+                   mock.patch.object(fetch_target.ssl, "create_default_context", return_value=ctx)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return connects, wraps
+
+    @staticmethod
+    def http(status, body=b"", location=None):
+        head = "HTTP/1.1 %d X\r\nContent-Length: %d\r\n" % (status, len(body))
+        if location:
+            head += "Location: %s\r\n" % location
+        return head.encode() + b"\r\n" + body
+
+    def test_connects_to_the_validated_address_only(self):
+        connects, wraps = self.serve([self.http(200, b"doc")], ["93.184.215.14", "127.0.0.1"])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(fetch_target.fetch_doc("https://docs.example/x.md", tmp, set(), False)["saved_as"], "docs/x.md")
+            self.assertEqual(Path(tmp, "x.md").read_bytes(), b"doc")
+        self.assertEqual(connects, [("93.184.215.14", 443)])
+        self.assertEqual(wraps, ["docs.example"])
+
+    def test_redirects_are_revalidated_and_pinned(self):
+        connects, _ = self.serve([self.http(302, location="http://other.example:8080/y.md"), self.http(200, b"ok")],
+                                 ["93.184.215.14", "93.184.215.15"])
+        self.assertEqual(fetch_target.pinned_get("http://docs.example/x.md", time.monotonic() + 10), b"ok")
+        self.assertEqual(connects, [("93.184.215.14", 80), ("93.184.215.15", 8080)])
+        connects, _ = self.serve([self.http(302, location="http://rebind.example/")], ["93.184.215.14", "169.254.169.254"])
+        with self.assertRaisesRegex(FetchError, "non-public"):
+            fetch_target.pinned_get("http://docs.example/x.md", time.monotonic() + 10)
+        self.assertEqual(connects, [("93.184.215.14", 80)])
+        self.serve([self.http(302, location="file:///etc/passwd")], ["93.184.215.14"])
+        with self.assertRaisesRegex(FetchError, "only http"):
+            fetch_target.pinned_get("http://docs.example/x.md", time.monotonic() + 10)
+
+    def test_redirect_limit_and_size_cap(self):
+        self.serve([self.http(302, location="/again")] * 6, ["93.184.215.14"] * 6)
+        with self.assertRaisesRegex(FetchError, "more than 5 redirects"):
+            fetch_target.pinned_get("http://docs.example/x.md", time.monotonic() + 10)
+        self.serve([self.http(200, b"x" * 50)], ["93.184.215.14"])
+        with mock.patch.object(fetch_target, "DOC_MAX_BYTES", 10), self.assertRaisesRegex(FetchError, "exceeds"):
+            fetch_target.pinned_get("http://docs.example/x.md", time.monotonic() + 10)
 
     def test_local_http_server_is_refused(self):
         server = http.server.HTTPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler)
@@ -461,21 +514,17 @@ class DocUrlSafetyTests(unittest.TestCase):
 
     def test_total_deadline(self):
         class Slow:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
+            status = 200
 
             def read1(self, n):
                 time.sleep(0.02)
                 return b"x"
 
-        opener = mock.Mock()
-        opener.open.return_value = Slow()
+        conn = mock.Mock()
+        conn.getresponse.return_value = Slow()
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(fetch_target, "DOC_DEADLINE", 0.1), \
-                mock.patch.object(fetch_target.urllib.request, "build_opener", return_value=opener):
+                mock.patch.object(fetch_target.http.client, "HTTPConnection", return_value=conn):
             with self.assertRaisesRegex(FetchError, "took longer"):
                 fetch_target.fetch_doc(self.PUBLIC, tmp, set(), False)
 

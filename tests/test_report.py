@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -289,6 +290,27 @@ class ReportTest(unittest.TestCase):
         self.assertIn("### “q &lt;img src=y&gt; # fake heading " + "x" * 30 + "…”", lines)
         self.assertIn("> “q &lt;img src=y&gt; # fake heading " + "x" * 80 + "”", lines)
         self.assertFalse([ln for ln in lines if ln.lstrip("#").startswith((" Fake", " fake", " injected"))])
+
+    def test_untrusted_text_cannot_form_links_or_images(self):
+        exp = self.audit / "experiments" / "e1"
+        exp.mkdir(parents=True)
+        (exp / "results.json").write_text("{}")
+        (exp / "results.md").write_text("![px](https://attacker.invalid/r.png) [x][1]\n\n[1]: https://attacker.invalid/r\n")
+        d = self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")
+        d["features"][0]["name"] = "![preview](https://attacker.invalid/pixel)"
+        d["claims"][0]["quote"] = "see [docs](https://attacker.invalid/a \"t\") \\[esc\\]"
+        d["conclusion"]["reasons"] = ["[x][1]", "[1]: https://attacker.invalid/ref", "<https://attacker.invalid/auto>",
+                                      "bare https://example.invalid/ok"]
+        self.assertEqual(self.errors(d), [])
+        md = report.render(self.audit, "en")
+        self.assertIsNone(re.search(r"(?<!\\)\[", md.replace("\\\\", "")), [ln for ln in md.splitlines() if "[" in ln])
+        self.assertNotIn("<https://", md)
+        self.assertIn("| !\\[preview\\](https://attacker.invalid/pixel) |", md)
+        self.assertIn("- \\[1\\]: https://attacker.invalid/ref", md.splitlines())
+        self.assertIn("- &lt;https://attacker.invalid/auto&gt;", md.splitlines())
+        self.assertIn("- bare https://example.invalid/ok", md.splitlines())
+        self.assertIn("!\\[px\\](https://attacker.invalid/r.png) \\[x\\]\\[1\\]\n\n\\[1\\]: https://attacker.invalid/r", md)
+        self.assertIn("\\\\\\[esc\\\\\\]", md)
 
     def test_locations_with_backticks_render_as_code(self):
         self.assertEqual(report._code("a`b"), "``a`b``")

@@ -480,7 +480,8 @@ def _all_locations(a):
 
 
 def _esc(s):
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    s = str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return s.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _line(s):

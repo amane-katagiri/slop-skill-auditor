@@ -43,7 +43,7 @@ from exp_plan import (  # noqa: E402
 )
 from exp_render import render_activation_md, render_md  # noqa: E402
 from exp_sandbox import (  # noqa: E402
-    bwrap_status, build_checked_argv, build_settings, claude_version, isolation_deny_dirs, make_workdir,
+    FileSizeLimitExceeded, bwrap_status, build_checked_argv, build_settings, claude_version, isolation_deny_dirs, make_workdir,
     resolve_backend_argv, run_process, safe_rmtree, sandbox_run, stdin_payload,
 )
 from exp_stats import (  # noqa: E402
@@ -52,7 +52,8 @@ from exp_stats import (  # noqa: E402
     metric_values, min_attainable_p, pareto_label, rate, scores_per_run, wilson,
 )
 from exp_tree import (  # noqa: E402
-    EMPTY_SHA256, copy_tree, files_changed, inside, sha256_bytes, skip_git, skip_installed_skills, tree_fingerprint,
+    EMPTY_SHA256, UnsafeDestination, copy_tree, files_changed, inside, safe_copy_file, safe_overlay, sha256_bytes, skip_git,
+    skip_installed_skills, tree_fingerprint,
 )
 
 RESULTS_SCHEMA = "slop-skill-auditor/experiment-results@1"
@@ -84,6 +85,7 @@ def parse_stream(path: Path) -> dict:
     init_skills = None
     tool_uses = []
     tool_results = {}
+    tool_errors = set()
     texts = []
     user_texts = []
     if path.is_file():
@@ -122,30 +124,29 @@ def parse_stream(path: Path) -> dict:
                         if isinstance(c, list):
                             c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
                         tool_results[item.get("tool_use_id")] = str(c or "")
+                        if item.get("is_error"):
+                            tool_errors.add(item.get("tool_use_id"))
                     elif item.get("type") == "text":
                         bucket.append(item.get("text", ""))
-    return {"result": result, "tool_uses": tool_uses, "tool_results": tool_results, "texts": texts,
+    return {"result": result, "tool_uses": tool_uses, "tool_results": tool_results, "tool_errors": tool_errors, "texts": texts,
             "user_texts": user_texts, "init_skills": init_skills}
 
 
 def skill_activation(parsed: dict, skill_name: str) -> tuple[bool, list[str]]:
     evidence = []
-    marker = f".claude/skills/{skill_name}"
+    skill_md = f".claude/skills/{skill_name}/SKILL.md"
     for tu in parsed["tool_uses"]:
-        name = tu.get("name")
+        if tu.get("id") not in parsed["tool_results"] or tu.get("id") in parsed["tool_errors"]:
+            continue
         inp = tu.get("input") if isinstance(tu.get("input"), dict) else {}
-        values = [v for v in inp.values() if isinstance(v, str)]
-        if name == "Skill" and any(v == skill_name or v.endswith(":" + skill_name) or v.split()[:1] == [skill_name] for v in values):
+        skill, path = inp.get("skill"), inp.get("file_path")
+        if tu.get("name") == "Skill" and isinstance(skill, str) and (
+                skill == skill_name or skill.endswith(":" + skill_name) or skill.split()[:1] == [skill_name]):
             evidence.append(f"Skill tool_use {inp}")
-        elif any(marker in v for v in values):
-            evidence.append(f"{name} touched {marker}")
-    for text in parsed["user_texts"]:
-        if f"<command-name>/{skill_name}</command-name>" in text:
-            evidence.append("slash command expanded (<command-name> marker)")
-            break
-        if (marker + "\n") in text or (marker + "/") in text:
-            evidence.append("skill content injected into conversation")
-            break
+        elif tu.get("name") == "Read" and isinstance(path, str) and (path == skill_md or path.endswith("/" + skill_md)):
+            evidence.append(f"Read {skill_md}")
+    if any(f"<command-name>/{skill_name}</command-name>" in text for text in parsed["user_texts"]):
+        evidence.append("slash command expanded (<command-name> marker)")
     return bool(evidence), evidence[:10]
 
 
@@ -266,16 +267,18 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         steps["glob_tool_workdir"] = "ok" if glob and "write_ok.txt" in glob else "failed"
         out["steps"] = steps
         out["token_leaked"] = leak
-        out["hooks_disabled"] = not fired
+        out["hooks_disabled"] = not fired and out["hook_skill_loaded"]
         file_tools = ("read_tool_home_file", "read_tool_experiment_dir", "grep_tool_skill_source")
         if sandbox:
-            out["ok"] = (not leak and not fired and all(steps[k] == "blocked" for k in (*file_tools, "bash_read_home_file", "bash_network", "bash_list_home",
+            out["ok"] = (not leak and out["hooks_disabled"] and all(steps[k] == "blocked" for k in (*file_tools, "bash_read_home_file", "bash_network", "bash_list_home",
                                                                                           "bash_read_experiment_and_skill_source"))
                          and all(steps[k] == "ok" for k in ("write_tool_workdir", "bash_write_workdir", "glob_tool_workdir")))
         else:
-            out["ok"] = (not leak and not fired and all(steps[k] == "blocked" for k in file_tools)
+            out["ok"] = (not leak and out["hooks_disabled"] and all(steps[k] == "blocked" for k in file_tools)
                          and steps["write_tool_workdir"] == "ok" and steps["bash_write_workdir"] == "failed")
-        if not out["ok"]:
+        if not out["hook_skill_loaded"]:
+            out["reason"] = "probe skill did not load; hook test inconclusive"
+        elif not out["ok"]:
             out["reason"] = "expected isolation not observed (see steps, hooks_fired, token_leaked)"
         return out
     finally:
@@ -366,6 +369,10 @@ def run_metrics(task: dict, workdir: Path, bwrap_ok: bool, bwrap_reason: str) ->
             rec["reason"] = f"timeout after {CHECK_TIMEOUT_S}s"
             out.append(rec)
             continue
+        except FileSizeLimitExceeded as e:
+            rec["reason"] = str(e)
+            out.append(rec)
+            continue
         rec["exit_code"] = r.returncode
         lines = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
         if r.returncode != 0:
@@ -397,6 +404,8 @@ def run_checks(task: dict, workdir: Path, bwrap_ok: bool, bwrap_reason: str) -> 
                         "stdout_tail": r.stdout[-2000:], "stderr_tail": r.stderr[-2000:]})
         except subprocess.TimeoutExpired:
             out.append({"id": c["id"], "status": "timeout", "exit_code": None, "passed": False})
+        except FileSizeLimitExceeded as e:
+            out.append({"id": c["id"], "status": "file_size_limit", "exit_code": None, "passed": False, "reason": str(e)})
     return out
 
 
@@ -543,27 +552,31 @@ def reference_key(task_id: str, ref_id: str) -> str:
 
 def apply_reference(ref: dict, wd: Path, exp_dir: Path, bwrap: tuple[bool, str]) -> str | None:
     kind = ref["kind"]
-    if kind == "copy":
-        src, dst = (wd / ref["from"]).resolve(), (wd / ref["to"]).resolve()
-        if wd not in src.parents or wd not in dst.parents:
-            return "copy paths escape the workdir"
-        if not src.exists():
-            return f"'from' {ref['from']!r} not found in the fixture copy"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_dir():
-            shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src, dst, follow_symlinks=False)
-        return None
-    if kind == "files":
-        copy_tree(resolve_path(exp_dir, ref["dir"]), wd)
-        return None
+    try:
+        if kind == "copy":
+            src = (wd / ref["from"]).resolve()
+            if wd.resolve() not in src.parents:
+                return "copy 'from' escapes the workdir"
+            if not src.exists():
+                return f"'from' {ref['from']!r} not found in the fixture copy"
+            if src.is_dir():
+                safe_overlay(src, wd, Path(ref["to"]))
+            else:
+                safe_copy_file(src, wd, Path(ref["to"]))
+            return None
+        if kind == "files":
+            safe_overlay(resolve_path(exp_dir, ref["dir"]), wd)
+            return None
+    except UnsafeDestination as e:
+        return f"refusing to write through a symlink in the fixture copy: {e}"
     if not bwrap[0]:
         return f"refusing to run reference command without the no-network sandbox: {bwrap[1]}"
     try:
         r = sandbox_run(ref["command"], wd, REFERENCE_COMMAND_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return f"reference command timed out after {REFERENCE_COMMAND_TIMEOUT_S}s"
+    except FileSizeLimitExceeded as e:
+        return f"reference command stopped: {e}"
     if r.returncode != 0:
         return f"reference command exited {r.returncode}: {r.stderr.strip()[-300:]}"
     return None

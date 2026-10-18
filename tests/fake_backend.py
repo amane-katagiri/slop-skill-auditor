@@ -38,7 +38,12 @@ def judge(args, prompt):
 
 
 def selftest(cwd, prompt, sandbox):
-    emit({"type": "system", "subtype": "init", "skills": []})
+    probe = re.match(r"/(\S+) ", prompt)
+    skills = [probe.group(1)] if probe and (cwd / ".claude" / "skills" / probe.group(1) / "SKILL.md").is_file() else []
+    emit({"type": "system", "subtype": "init", "skills": skills})
+    emit({"type": "user", "message": {"role": "user", "content": prompt}, "isReplay": True})
+    if skills and not os.environ.get("FAKE_NO_LOAD"):
+        emit({"type": "user", "message": {"role": "user", "content": f"<command-name>/{skills[0]}</command-name>"}, "isReplay": True})
     if os.environ.get("FAKE_FIRE_HOOKS"):
         for entries in json.loads((cwd / ".claude" / "settings.json").read_text())["hooks"].values():
             Path(entries[0]["hooks"][0]["command"].split()[-1]).touch()
@@ -67,7 +72,8 @@ def selftest(cwd, prompt, sandbox):
             out = "\n".join(str(p) for p in cwd.glob("*.txt"))
         else:
             out = "Permission denied"
-        emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": out}]}})
+        emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": out,
+                                                       "is_error": out == "Permission denied"}]}})
     emit(result_line("DONE", cost=0.002))
 
 

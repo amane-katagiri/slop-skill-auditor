@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 import argparse
 import datetime
+import http.client
 import ipaddress
 import os
 import posixpath
 import re
 import shutil
 import socket
+import ssl
 import stat
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import EXTERNAL_MAX_FILES, PROVENANCE_SCHEMA, SKIP_DIRS, is_repo_doc, skill_externals, write_json  # noqa: E402
@@ -34,6 +35,7 @@ CLONE_ONLY = ["-c", "core.symlinks=false"]
 GIT_HEAD_MAX_BYTES = 4096
 GIT_PACKED_MAX_BYTES = 8 * 1024 * 1024
 DOC_DEADLINE = 120
+DOC_MAX_REDIRECTS = 5
 
 
 class FetchError(Exception):
@@ -332,21 +334,59 @@ def check_url(url):
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise FetchError("refusing doc URL %s: only http(s) URLs with a host are allowed" % url)
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 80, proto=socket.IPPROTO_TCP)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        infos = socket.getaddrinfo(parts.hostname, port, proto=socket.IPPROTO_TCP)
     except (OSError, ValueError) as e:
         raise FetchError("cannot resolve doc URL host %s: %s" % (parts.hostname, e))
+    ips = []
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%", 1)[0])
         if ip.version == 6 and ip.ipv4_mapped:
             ip = ip.ipv4_mapped
         if not ip.is_global or ip.is_multicast:
             raise FetchError("refusing doc URL %s: host resolves to non-public address %s" % (url, ip))
+        ips.append(str(ip))
+    if not ips:
+        raise FetchError("cannot resolve doc URL host %s" % parts.hostname)
+    return parts, port, ips[0]
 
 
-class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        check_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+def pinned_get(url, deadline):
+    for _ in range(DOC_MAX_REDIRECTS + 1):
+        if time.monotonic() > deadline:
+            raise FetchError("doc %s took longer than %d s" % (url, DOC_DEADLINE))
+        parts, port, ip = check_url(url)
+        if parts.scheme == "https":
+            conn = http.client.HTTPSConnection(parts.hostname, port, timeout=DOC_TIMEOUT, context=ssl.create_default_context())
+        else:
+            conn = http.client.HTTPConnection(parts.hostname, port, timeout=DOC_TIMEOUT)
+        # Connect to the address that was validated; the TLS layer still verifies the certificate against conn.host.
+        conn._create_connection = lambda addr, timeout=None, source=None, ip=ip: socket.create_connection((ip, addr[1]), timeout, source)
+        try:
+            conn.request("GET", urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, "")),
+                         headers={"User-Agent": "slop-skill-auditor"})
+            resp = conn.getresponse()
+            if resp.status in (301, 302, 303, 307, 308):
+                if not resp.getheader("Location"):
+                    raise FetchError("doc %s: redirect without Location" % url)
+                url = urllib.parse.urljoin(url, resp.getheader("Location"))
+                continue
+            if resp.status != 200:
+                raise FetchError("doc %s: HTTP %d" % (url, resp.status))
+            chunks, size = [], 0
+            while chunk := resp.read1(64 * 1024):
+                if time.monotonic() > deadline:
+                    raise FetchError("doc %s took longer than %d s" % (url, DOC_DEADLINE))
+                size += len(chunk)
+                if size > DOC_MAX_BYTES:
+                    raise FetchError("doc %s exceeds %d bytes" % (url, DOC_MAX_BYTES))
+                chunks.append(chunk)
+            return b"".join(chunks)
+        except (OSError, http.client.HTTPException) as e:
+            raise FetchError("cannot download doc %s: %s" % (url, e))
+        finally:
+            conn.close()
+    raise FetchError("doc %s: more than %d redirects" % (url, DOC_MAX_REDIRECTS))
 
 
 def fetch_doc(spec, docs_dir, used, offline):
@@ -355,24 +395,10 @@ def fetch_doc(spec, docs_dir, used, offline):
     if parsed.scheme in ("http", "https"):
         if offline:
             raise FetchError("--offline: cannot download doc %s" % spec)
-        check_url(spec)
+        data = pinned_get(spec, time.monotonic() + DOC_DEADLINE)
         name = safe_doc_name(os.path.basename(parsed.path) or parsed.netloc, used)
-        req = urllib.request.Request(spec, headers={"User-Agent": "slop-skill-auditor"})
-        deadline = time.monotonic() + DOC_DEADLINE
-        chunks, size = [], 0
-        with urllib.request.build_opener(SafeRedirectHandler).open(req, timeout=DOC_TIMEOUT) as resp:
-            while True:
-                if time.monotonic() > deadline:
-                    raise FetchError("doc %s took longer than %d s" % (spec, DOC_DEADLINE))
-                chunk = resp.read1(64 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > DOC_MAX_BYTES:
-                    raise FetchError("doc %s exceeds %d bytes" % (spec, DOC_MAX_BYTES))
-                chunks.append(chunk)
         with open(os.path.join(docs_dir, name), "wb") as f:
-            f.write(b"".join(chunks))
+            f.write(data)
         return {"input": spec, "saved_as": "docs/" + name}
     if parsed.scheme and len(parsed.scheme) > 1:
         raise FetchError("unsupported doc scheme: %s" % spec)
