@@ -13,7 +13,7 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[2] / "skills" / "slop-skill-auditor"
 SKILL_REL = ".claude/skills/slop-skill-auditor"
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
-from experiment import child_env, make_workdir  # noqa: E402
+from exp_sandbox import child_env, make_workdir  # noqa: E402
 
 READ_ONLY_COMMANDS = ("ls", "cat", "head", "tail", "wc", "grep", "file", "stat")
 SKILL_COPY_IGNORE = shutil.ignore_patterns("__pycache__")

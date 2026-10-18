@@ -6,10 +6,12 @@ import posixpath
 import re
 import stat
 import sys
+from collections import Counter, deque
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (  # noqa: E402
-    INVENTORY_SCHEMA, dump_json, load_json, parse_frontmatter, read_text, sha256_file, split_lines, write_json,
+    INVENTORY_SCHEMA, SKIP_DIRS, TEXT_MAX_BYTES, decode_text, dump_json, is_repo_doc, is_script_file, load_json,
+    parse_frontmatter, sha256_file, skill_label, split_lines, write_json,
 )
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -114,8 +116,13 @@ def describe_file(root, rel):
     if not stat.S_ISREG(st.st_mode):
         info.update(kind="other", sha256=hashlib.sha256(b"").hexdigest())
         return info, None
-    info["sha256"] = sha256_file(full)
-    text = read_text(full)
+    if st.st_size > TEXT_MAX_BYTES:
+        info.update(kind="binary", sha256=sha256_file(full))
+        return info, None
+    with open(full, "rb") as f:
+        data = f.read()
+    info["sha256"] = hashlib.sha256(data).hexdigest()
+    text = decode_text(data)
     if text is None:
         info["kind"] = "binary"
         return info, None
@@ -147,8 +154,8 @@ def code_fence_map(lines):
     return blocks, inside
 
 
-def skill_md_facts(lines, fm):
-    blocks, inside = code_fence_map(lines)
+def skill_md_facts(lines, fm, fences=None):
+    blocks, inside = fences or code_fence_map(lines)
     headings = []
     for idx, ln in enumerate(lines, 1):
         if idx in inside or (fm["present"] and fm["line_end"] and idx <= fm["line_end"]):
@@ -228,8 +235,6 @@ def extract_refs(rel, lines, top_dirs, fenced=frozenset()):
 
 
 def resolve_ref(ref, files, dirs, lower_map, base_map):
-    """Return (resolved, exists, resolution). Case-insensitive and unique-basename matches are
-    reported separately because they are inferences, not exact paths."""
     from_dir = posixpath.dirname(ref["from"])
     target = ref["target"]
     is_dir_ref = target.endswith("/")
@@ -255,31 +260,29 @@ def resolve_ref(ref, files, dirs, lower_map, base_map):
     return (options[0] if options else None), False, None
 
 
-def scan_indicators(rel, lines, is_markdown):
+def scan_indicators(rel, lines, blocks=()):
     out = []
     for idx, ln in enumerate(lines, 1):
         for kind, rx in INDICATOR_RES:
             m = rx.search(ln)
             if m:
                 out.append({"path": rel, "line": idx, "kind": kind, "match": excerpt(m.group(0)), "excerpt": excerpt(ln)})
-    if is_markdown:
-        blocks, _ = code_fence_map(lines)
-        for lang, start, end in blocks:
-            if lang not in SHELL_LANGS:
+    for lang, start, end in blocks:
+        if lang not in SHELL_LANGS:
+            continue
+        for idx in range(start + 1, end):
+            s = lines[idx - 1].strip()
+            if s.startswith(("$ ", "% ", "> ")):
+                s = s[2:].strip()
+            if not s or s.startswith("#"):
                 continue
-            for idx in range(start + 1, end):
-                s = lines[idx - 1].strip()
-                if s.startswith(("$ ", "% ", "> ")):
-                    s = s[2:].strip()
-                if not s or s.startswith("#"):
-                    continue
-                toks = s.split()
-                while toks and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0]):
-                    toks.pop(0)
-                if toks and toks[0] in ("sudo", "env", "exec", "time", "nohup") and len(toks) > 1:
-                    toks.pop(0)
-                if toks and re.match(r"^[\w./@+-]+$", toks[0]):
-                    out.append({"path": rel, "line": idx, "kind": "cli_command", "match": toks[0], "excerpt": excerpt(lines[idx - 1])})
+            toks = s.split()
+            while toks and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0]):
+                toks.pop(0)
+            if toks and toks[0] in ("sudo", "env", "exec", "time", "nohup") and len(toks) > 1:
+                toks.pop(0)
+            if toks and re.match(r"^[\w./@+-]+$", toks[0]):
+                out.append({"path": rel, "line": idx, "kind": "cli_command", "match": toks[0], "excerpt": excerpt(lines[idx - 1])})
     return out
 
 
@@ -308,7 +311,6 @@ def scan_injection(rel, lines, text):
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]")
 TRIGGER_RE = re.compile(r"\buse\s+(?:it\s+|this\s+(?:skill\s+)?)?(?:when|for|if|whenever)\b|\bwhen\s+(?:the\s+)?user|\btrigger|とき|時に|場合|依頼", re.I)
-SCRIPT_EXTS = {".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1", ".lua", ".php", ".go", ".rs"}
 NON_SKILL_DIRS = {"tests", "test", "fixtures", "examples"}
 MISSING_SCOPE = (
     "only references made from review_targets (SKILL.md, files reachable from it, files under scripts/ or bin/, executables, "
@@ -336,8 +338,7 @@ def cost_of(texts):
 
 
 def is_script(info):
-    top = info["path"].split("/", 1)[0]
-    return bool(info["executable"] or info["shebang"] or info["ext"] in SCRIPT_EXTS or top in ("scripts", "bin"))
+    return is_script_file(info["path"], info["executable"], info["shebang"]) or info["path"].split("/", 1)[0] in ("scripts", "bin")
 
 
 def spec_checks(fm, skill_md, dir_name):
@@ -389,10 +390,11 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
         if lines is not None:
             texts[rel] = lines
 
+    fences = {rel: code_fence_map(lines) for rel, lines in texts.items() if rel.lower().endswith(MD_EXTS)}
     skill_lines = texts.get("SKILL.md")
     skill_text = "\n".join(skill_lines) if skill_lines is not None else ""
-    fm = parse_frontmatter(skill_text) if skill_lines is not None else parse_frontmatter("")
-    skill_md = skill_md_facts(skill_lines, fm) if skill_lines is not None else None
+    fm = parse_frontmatter(skill_text)
+    skill_md = skill_md_facts(skill_lines, fm, fences["SKILL.md"]) if skill_lines is not None else None
 
     lower_map, base_map = {}, {}
     for p in paths:
@@ -408,24 +410,29 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
             scan[rel] = texts[rel]
     references = []
     for rel in sorted(texts):
-        fenced = code_fence_map(texts[rel])[1] if rel.lower().endswith(MD_EXTS) else frozenset()
+        fenced = fences[rel][1] if rel in fences else frozenset()
         for ref in extract_refs(rel, scan[rel], top_dirs, fenced):
             ref["resolved"], ref["exists"], ref["resolution"] = resolve_ref(ref, file_set, dirs, lower_map, base_map)
             if ref["kind"] == "bare_path" and "/" not in ref["target"] and not ref["exists"]:
                 continue
             references.append(ref)
 
+    under = {}
+    for p in paths:
+        parts = p.split("/")
+        for i in range(1, len(parts)):
+            under.setdefault("/".join(parts[:i]), []).append(p)
     reachable = set()
-    queue = ["SKILL.md"] if "SKILL.md" in file_set else []
+    queue = deque(["SKILL.md"] if "SKILL.md" in file_set else [])
     seen = set(queue)
     by_from = {}
     for ref in references:
         if ref["exists"]:
             by_from.setdefault(ref["from"], []).append(ref["resolved"])
     while queue:
-        cur = queue.pop(0)
+        cur = queue.popleft()
         for res in by_from.get(cur, []):
-            hits = [res] if res in file_set else [p for p in paths if p.startswith(res + "/")]
+            hits = [res] if res in file_set else under.get(res, [])
             for h in hits:
                 reachable.add(h)
                 if h not in seen:
@@ -470,10 +477,9 @@ def build_inventory(skill_root, skill_root_label, dir_name=None, provenance=None
             missing[key] = {"target": ref["target"], "resolved": ref["resolved"], "from": ref["from"], "line": ref["line"], "count": 0}
         missing[key]["count"] += 1
 
-
     indicators, injections = [], []
     for rel in sorted(texts):
-        indicators.extend(scan_indicators(rel, scan[rel], rel.lower().endswith(MD_EXTS)))
+        indicators.extend(scan_indicators(rel, scan[rel], fences[rel][0] if rel in fences else ()))
         injections.extend(scan_injection(rel, scan[rel], "\n".join(texts[rel])))
     indicators.sort(key=lambda x: (x["path"], x["line"], x["kind"]))
 
@@ -511,16 +517,13 @@ def source_context(audit_dir, prov):
     for dirpath, dirnames, filenames in os.walk(source_root, followlinks=False):
         rel_dir = os.path.relpath(dirpath, source_root).replace(os.sep, "/")
         depth = 0 if rel_dir == "." else rel_dir.count("/") + 1
-        dirnames[:] = sorted(d for d in dirnames if d not in (".git", "node_modules", ".venv", "__pycache__")) if depth < 2 else []
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS) if depth < 2 else []
         for f in filenames:
             rel = f if rel_dir == "." else rel_dir + "/" + f
             in_skill = sub == "." or rel == sub or rel.startswith(sub + "/")
             if in_skill:
                 continue
-            up = f.upper()
-            is_doc = up.startswith("README") or up.startswith("CHANGELOG") or (
-                posixpath.basename(rel_dir) == "docs" and f.lower().endswith(".md"))
-            if is_doc and os.path.isfile(os.path.join(dirpath, f)) and not os.path.islink(os.path.join(dirpath, f)):
+            if is_repo_doc(rel_dir, f) and os.path.isfile(os.path.join(dirpath, f)) and not os.path.islink(os.path.join(dirpath, f)):
                 repo_docs.append("@repo/" + rel)
     docs_dir = os.path.join(audit_dir, "docs")
     user_docs = sorted("@docs/" + f for f in os.listdir(docs_dir)) if os.path.isdir(docs_dir) else []
@@ -534,9 +537,7 @@ def summary(inv):
     desc = " ".join(str(desc).split()) if desc is not None else "-"
     out.append("name:        %s (dir: %s)" % (parsed.get("name", "-"), inv["skill_name_dir"]))
     out.append("description: %s" % (desc if len(desc) <= 200 else desc[:199] + "…"))
-    kinds = {}
-    for f in inv["files"]:
-        kinds[f["kind"]] = kinds.get(f["kind"], 0) + 1
+    kinds = Counter(f["kind"] for f in inv["files"])
     out.append("files:       %d (%s)" % (len(inv["files"]), ", ".join("%s %d" % kv for kv in sorted(kinds.items()))))
     if inv["skill_md"]:
         out.append("SKILL.md:    %d lines, %d body words, %d headings, %d code blocks" % (
@@ -549,9 +550,7 @@ def summary(inv):
         out.append("missing ref: %s (first at %s:%d, %dx)" % (m["target"], m["from"], m["line"], m["count"]))
     if inv["unreferenced_files"]:
         out.append("unreferenced: %s" % ", ".join(inv["unreferenced_files"]))
-    counts = {}
-    for i in inv["external_indicators"]:
-        counts[i["kind"]] = counts.get(i["kind"], 0) + 1
+    counts = Counter(i["kind"] for i in inv["external_indicators"])
     out.append("indicators:  %s" % (", ".join("%s %d" % kv for kv in sorted(counts.items())) or "none"))
     for t in inv["truncated_lines"]["files"]:
         out.append("long lines:  %s: %d lines over %d chars, scanned only up to that length (first at line %d)" % (
@@ -593,9 +592,7 @@ def main(argv=None):
         else:
             audit_dir = os.path.abspath(args.audit_dir)
             prov = load_json(os.path.join(audit_dir, "provenance.json"))
-            if not prov.get("source_root") or prov.get("skill_subpath") is None:
-                raise ValueError("provenance.json has no resolved skill; rerun fetch_target.py with --skill")
-            label = posixpath.normpath(posixpath.join(prov["source_root"], prov["skill_subpath"]))
+            label = skill_label(prov)
             skill_root = os.path.join(audit_dir, label)
             if not os.path.isdir(skill_root):
                 raise ValueError("skill root missing: %s" % skill_root)

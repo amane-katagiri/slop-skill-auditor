@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import PROVENANCE_SCHEMA, SKIP_DIRS, write_json  # noqa: E402
+from _common import PROVENANCE_SCHEMA, SKIP_DIRS, is_repo_doc, write_json  # noqa: E402
 
 EXIT_ERROR = 2
 EXIT_AMBIGUOUS = 3
@@ -59,8 +59,6 @@ def run_git(args, cwd=None, check=True, extra=()):
 
 
 def parse_github_url(url):
-    """Classify a GitHub URL. Returns dict(kind, owner, repo, repo_url, rest) where `rest`
-    is the undecoded `REF/PATH` remainder for tree/blob URLs (None otherwise)."""
     parsed = urllib.parse.urlsplit(url.strip())
     if parsed.scheme not in ("http", "https") or parsed.netloc.lower() not in ("github.com", "www.github.com"):
         return None
@@ -99,8 +97,6 @@ def parse_ls_remote(output):
 
 
 def split_ref_path(rest, refs):
-    """Split `REF/PATH` using known ref names (longest prefix wins) or a leading 40-hex SHA.
-    Returns (ref, path, is_sha)."""
     rest = rest.strip("/")
     first = rest.split("/", 1)[0]
     if SHA_RE.match(first):
@@ -125,9 +121,13 @@ def find_skill_dirs(root):
     return sorted(found)
 
 
-def choose_skill(base, skill_opt):
-    """Return (skill_subpath relative to base, candidates relative to base, ambiguous)."""
-    candidates = find_skill_dirs(base)
+def candidates_under(candidates, sub):
+    if sub == ".":
+        return candidates
+    return sorted("." if c == sub else c[len(sub) + 1:] for c in candidates if c == sub or c.startswith(sub + "/"))
+
+
+def choose_skill(base, skill_opt, candidates):
     if skill_opt:
         sub = os.path.normpath(skill_opt).replace(os.sep, "/")
         if sub.startswith("../") or sub == ".." or os.path.isabs(sub):
@@ -158,12 +158,6 @@ def find_git_root(path):
         if parent == cur:
             return None
         cur = parent
-
-
-def is_repo_doc(rel_dir, name):
-    up = name.upper()
-    return up.startswith("README") or up.startswith("CHANGELOG") or (
-        posixpath.basename(rel_dir) == "docs" and name.lower().endswith(".md"))
 
 
 def rel_join(*parts):
@@ -403,10 +397,6 @@ def ensure_empty_source(source, force):
             raise FetchError("%s is not empty (use --force to replace it)" % source)
 
 
-def join_sub(a, b):
-    return posixpath.normpath(posixpath.join(a, b))
-
-
 def default_out(spec):
     hint = re.sub(r"[^A-Za-z0-9._-]+", "-", spec.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")).strip("-.") or "skill"
     if hint == "SKILL.md":
@@ -459,16 +449,18 @@ def fetch(args):
         if not os.path.isdir(base):
             shutil.rmtree(source)
             raise FetchError("path %s does not exist at %s" % (path, ref or "default branch"))
-        sub, cands, ambiguous = choose_skill(base, args.skill)
+        everything = find_skill_dirs(source)
+        cands = candidates_under(everything, path) if not SKIP_DIRS.intersection(path.split("/")) else find_skill_dirs(base)
+        sub, cands, ambiguous = choose_skill(base, args.skill, cands)
         prov["source_root"] = "source"
-        prov["candidates"] = find_skill_dirs(source)
+        prov["candidates"] = everything
         if ambiguous:
             prov["candidates"] = cands
             prov["candidates_relative_to"] = "input"
             prov["source_root"] = None
             shutil.rmtree(source)
         else:
-            prov["skill_subpath"] = join_sub(path, sub)
+            prov["skill_subpath"] = rel_join(path, sub)
             prov["skill_dir_name"] = gh["repo"] if prov["skill_subpath"] == "." else os.path.basename(prov["skill_subpath"])
     else:
         target = os.path.abspath(args.input)
@@ -477,11 +469,13 @@ def fetch(args):
                 raise FetchError("file input must be a SKILL.md: %s" % args.input)
             prov["kind"] = "local_skill_md"
             skill_dir = os.path.dirname(target)
+            target_cands = None
             if args.skill:
                 raise FetchError("--skill cannot be combined with a SKILL.md path")
         elif os.path.isdir(target):
             prov["kind"] = "local_dir"
-            sub, cands, ambiguous = choose_skill(target, args.skill)
+            target_cands = find_skill_dirs(target)
+            sub, cands, ambiguous = choose_skill(target, args.skill, target_cands)
             if ambiguous:
                 prov["candidates"] = cands
                 prov["candidates_relative_to"] = "input"
@@ -505,7 +499,7 @@ def fetch(args):
             prov["source_root"] = "source"
             prov["skill_subpath"] = skill_rel
             prov["skill_dir_name"] = os.path.basename(skill_dir)
-            prov["candidates"] = find_skill_dirs(copy_root)
+            prov["candidates"] = target_cands if copy_root == target else find_skill_dirs(copy_root)
 
     used = set()
     for spec in args.doc or []:

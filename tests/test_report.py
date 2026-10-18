@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -71,18 +72,26 @@ VALID = {
 
 
 class ReportTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        self.audit = self.tmp / "audit"
-        src = self.audit / "source"
-        shutil.copytree(FIXTURES / "script-tool", src)
-        (self.audit / "provenance.json").write_text(json.dumps({
+    @classmethod
+    def setUpClass(cls):
+        cls.template = Path(tempfile.mkdtemp()) / "audit"
+        shutil.copytree(FIXTURES / "script-tool", cls.template / "source")
+        (cls.template / "provenance.json").write_text(json.dumps({
             "schema": "slop-skill-auditor/provenance@1", "input": str(FIXTURES / "script-tool"),
             "kind": "local_dir", "source_root": "source", "skill_subpath": ".", "candidates": ["."],
             "docs": [], "repo_url": None, "commit": None, "dirty": None, "ref_requested": None,
             "fetched_at": "2026-10-18T00:00:00Z", "tools": {},
         }))
-        subprocess.run([sys.executable, "-I", str(SCRIPTS / "inventory.py"), str(self.audit)], check=True, capture_output=True)
+        subprocess.run([sys.executable, "-I", str(SCRIPTS / "inventory.py"), str(cls.template)], check=True, capture_output=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.template.parent)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.audit = self.tmp / "audit"
+        shutil.copytree(self.template, self.audit, symlinks=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -275,6 +284,48 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(d["cited_files_jaccard"], 1.0)
         self.assertEqual(d["cited_lines_jaccard"], 1.0)
 
+
+    def test_diff_of_two_audits(self):
+        b = copy.deepcopy(VALID)
+        b["features"][0].update(locations=["scripts/csv_profile.py:2-5"], substitutability="short_instruction")
+        b["claims"][0]["implementation_evidence"] = []
+        b["claims"][0]["assessment"]["consistency"] = "possibly_exaggerated"
+        b["conclusion"]["verdicts"] = ["likely_replaceable_by_short_prompt"]
+        self.write(VALID)
+        (self.tmp / "b.json").write_text(json.dumps(b))
+        d = report.diff(self.audit / "audit.json", self.tmp / "b.json")
+        self.assertEqual(d["cited_files_jaccard"], 0.5)
+        self.assertEqual(d["cited_lines_jaccard"], round(2 / 6, 3))
+        self.assertEqual(d["substitutability"], [{"unique_value": 1}, {"short_instruction": 1}])
+        self.assertEqual(d["claim_assessments"]["consistency"], [{"consistent": 1}, {"possibly_exaggerated": 1}])
+        self.assertEqual(d["conclusion"], [["unique_value_unverified"], ["likely_replaceable_by_short_prompt"]])
+
+    def test_diff_handles_huge_ranges(self):
+        a, b = copy.deepcopy(VALID), copy.deepcopy(VALID)
+        a["features"][0]["locations"] = ["SKILL.md:1-1000000000", "SKILL.md:5-2"]
+        b["features"][0]["locations"] = ["SKILL.md:500000001-1500000000"]
+        a["claims"][0]["implementation_evidence"] = b["claims"][0]["implementation_evidence"] = []
+        (self.tmp / "a.json").write_text(json.dumps(a))
+        (self.tmp / "b.json").write_text(json.dumps(b))
+        t = time.monotonic()
+        d = report.diff(self.tmp / "a.json", self.tmp / "b.json")
+        self.assertLess(time.monotonic() - t, 1)
+        self.assertEqual(d["cited_lines_jaccard"], round(5e8 / 1.5e9, 3))
+
+    def test_check_reports_malformed_structure(self):
+        d = copy.deepcopy(VALID)
+        d["features"].append("F2")
+        d["claims"].append(["C2"])
+        d["claims"][0]["assessment"] = "high"
+        d["security_notes"] = ["note"]
+        d["summary"] = "text"
+        d["experiments"]["recommended"] = ["x"]
+        errors = self.errors(d)
+        for needle in ("features[1]: must be an object", "claims[1]: must be an object", "claims[C1].assessment: must be an object",
+                       "security_notes[0]: must be an object", "summary: must be an object", "experiments.recommended[0]: must be an object"):
+            self.assertIn(needle, errors)
+        self.write([1])
+        self.assertEqual(report.check(self.audit).errors, ["audit.json: top level must be an object"])
 
 if __name__ == "__main__":
     unittest.main()

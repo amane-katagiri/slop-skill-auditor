@@ -4,10 +4,11 @@ import datetime
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_json, resolve_location, write_json  # noqa: E402
+from _common import LocationResolver, load_json, write_json  # noqa: E402
 
 SCHEMA = "slop-skill-auditor/audit@1"
 
@@ -172,12 +173,12 @@ def _load_optional(path):
     return load_json(path) if path.exists() else None
 
 
-def _check_loc(audit_dir, loc, where, f):
+def _check_loc(resolve, loc, where, f):
     if not isinstance(loc, str) or not loc:
         f.error(where, f"location must be a non-empty string, got {loc!r}")
         return
     try:
-        resolve_location(audit_dir, loc)
+        resolve(loc)
     except ValueError as e:
         f.error(where, f"bad location {loc!r}: {e}")
 
@@ -229,6 +230,23 @@ def _list(obj, key, where, f):
     return v
 
 
+def _obj(value, where, f):
+    if not value:
+        return {}
+    if not isinstance(value, dict):
+        f.error(where, "must be an object")
+        return {}
+    return value
+
+
+def _objects(items, where, f):
+    for i, item in enumerate(items):
+        if isinstance(item, dict):
+            yield i, item
+        else:
+            f.error(f"{where}[{i}]", "must be an object")
+
+
 def check(audit_dir):
     f = Findings()
     path = audit_dir / "audit.json"
@@ -240,6 +258,10 @@ def check(audit_dir):
     except json.JSONDecodeError as e:
         f.error("audit.json", f"invalid JSON: {e}")
         return f
+    if not isinstance(a, dict):
+        f.error("audit.json", "top level must be an object")
+        return f
+    resolve = LocationResolver(audit_dir)
     inventory = _load_optional(audit_dir / "inventory.json")
     if inventory is None:
         f.warn("inventory.json", "not found; run inventory.py first so the report records the fingerprint")
@@ -247,20 +269,20 @@ def check(audit_dir):
     if a.get("schema") != SCHEMA:
         f.error("schema", f"expected {SCHEMA!r}")
 
-    summary = a.get("summary") or {}
+    summary = _obj(a.get("summary"), "summary", f)
     for key in ("purpose", "actual_behavior", "unique_capabilities", "expected_value", "claim_consistency"):
         _text(summary, key, "summary", f)
 
-    activation = a.get("activation") or {}
+    activation = _obj(a.get("activation"), "activation", f)
     _text(activation, "description", "activation", f)
     for loc in _list(activation, "evidence", "activation", f):
-        _check_loc(audit_dir, loc, "activation.evidence", f)
+        _check_loc(resolve, loc, "activation.evidence", f)
 
     features = _list(a, "features", "features", f)
     if not features:
         f.error("features", "at least one feature is required")
     seen = set()
-    for i, feat in enumerate(features):
+    for i, feat in _objects(features, "features", f):
         where = f"features[{feat.get('id', i)}]"
         fid = feat.get("id")
         if not fid or fid in seen:
@@ -278,16 +300,16 @@ def check(audit_dir):
         _enum(feat.get("confidence"), CONFIDENCE, where + ".confidence", f)
         locs = _list(feat, "locations", where, f)
         for loc in locs:
-            _check_loc(audit_dir, loc, where + ".locations", f)
+            _check_loc(resolve, loc, where + ".locations", f)
         if not locs and feat.get("basis") != "unconfirmed":
             f.error(where, "a feature without locations cannot be rated as implemented; add locations or set basis to 'unconfirmed'")
 
-    experiments = a.get("experiments") or {}
+    experiments = _obj(a.get("experiments"), "experiments", f)
     status = experiments.get("status")
     _enum(status, ["not_run", "run"], "experiments.status", f)
     runs = _list(experiments, "runs", "experiments", f)
     run_ids = set()
-    for i, run in enumerate(runs):
+    for i, run in _objects(runs, "experiments.runs", f):
         where = f"experiments.runs[{i}]"
         rid = run.get("id")
         rf = run.get("results_file")
@@ -308,7 +330,7 @@ def check(audit_dir):
 
     claims = _list(a, "claims", "claims", f)
     seen = set()
-    for i, cl in enumerate(claims):
+    for i, cl in _objects(claims, "claims", f):
         where = f"claims[{cl.get('id', i)}]"
         cid = cl.get("id")
         if not cid or cid in seen:
@@ -316,20 +338,20 @@ def check(audit_dir):
         seen.add(cid)
         _text(cl, "quote", where, f)
         _text(cl, "claimed_effect", where, f)
-        _check_loc(audit_dir, cl.get("source"), where + ".source", f)
-        assessment = cl.get("assessment") or {}
+        _check_loc(resolve, cl.get("source"), where + ".source", f)
+        assessment = _obj(cl.get("assessment"), where + ".assessment", f)
         for axis, allowed in AXES.items():
             _enum(assessment.get(axis), allowed, f"{where}.assessment.{axis}", f)
         _enum(cl.get("unique_value_basis"), BASES, where + ".unique_value_basis", f)
         impl = _list(cl, "implementation_evidence", where, f)
         for loc in impl:
-            _check_loc(audit_dir, loc, where + ".implementation_evidence", f)
+            _check_loc(resolve, loc, where + ".implementation_evidence", f)
         implementation = assessment.get("implementation")
         if implementation in ("confirmed", "partial", "missing", "contradicted") and not impl:
             f.error(where, f"implementation {implementation!r} needs implementation_evidence (for 'missing', cite the line that references the absent part)")
         ext = _list(cl, "experimental_evidence_locations", where, f)
         for loc in ext:
-            _check_loc(audit_dir, loc, where + ".experimental_evidence_locations", f)
+            _check_loc(resolve, loc, where + ".experimental_evidence_locations", f)
         ref = cl.get("experiment_ref")
         if ref is not None and status != "run":
             f.error(where, "experiment_ref is set but experiments.status is not 'run'")
@@ -347,14 +369,14 @@ def check(audit_dir):
 
     for kind, items, key in (("features", features, "basis"), ("claims", claims, "unique_value_basis")):
         for item in items:
-            if item.get(key) == "experiment_observed" and not run_ids:
+            if isinstance(item, dict) and item.get(key) == "experiment_observed" and not run_ids:
                 f.error(f"{kind}[{item.get('id')}]", f"{key} 'experiment_observed' without any experiment results")
 
-    necessity = a.get("necessity") or {}
+    necessity = _obj(a.get("necessity"), "necessity", f)
     for key in ("base_model", "short_instruction", "unique_value", "redundant", "unconfirmed"):
         _list(necessity, key, "necessity", f)
 
-    mp = a.get("minimal_prompt") or {}
+    mp = _obj(a.get("minimal_prompt"), "minimal_prompt", f)
     text = _text(mp, "text", "minimal_prompt", f)
     if len(text) > MINIMAL_PROMPT_MAX_CHARS:
         f.warn("minimal_prompt", f"text is {len(text)} chars; a minimal prompt should be a few lines a user would naturally write")
@@ -365,15 +387,15 @@ def check(audit_dir):
         f.error("minimal_prompt", "derived_from is empty; cite the README / description lines the purpose was taken from")
     fm = (inventory or {}).get("frontmatter") or {}
     for loc in derived:
-        _check_loc(audit_dir, loc, "minimal_prompt.derived_from", f)
+        _check_loc(resolve, loc, "minimal_prompt.derived_from", f)
         if not _purpose_source(loc, fm):
             f.error("minimal_prompt.derived_from", f"{loc!r} is not a README, user doc, or SKILL.md frontmatter line; the minimal prompt must not be distilled from the skill body")
 
-    for i, note in enumerate(_list(a, "security_notes", "security_notes", f)):
+    for i, note in _objects(_list(a, "security_notes", "security_notes", f), "security_notes", f):
         if note.get("location"):
-            _check_loc(audit_dir, note["location"], f"security_notes[{i}]", f)
+            _check_loc(resolve, note["location"], f"security_notes[{i}]", f)
 
-    conclusion = a.get("conclusion") or {}
+    conclusion = _obj(a.get("conclusion"), "conclusion", f)
     verdicts = _list(conclusion, "verdicts", "conclusion", f)
     if not verdicts:
         f.error("conclusion", "verdicts is empty")
@@ -382,8 +404,8 @@ def check(audit_dir):
     if not _list(conclusion, "reasons", "conclusion", f):
         f.error("conclusion", "reasons is empty")
 
-    for i, rec in enumerate(_list(experiments, "recommended", "experiments", f)):
-        for cid in rec.get("claim_ids", []):
+    for i, rec in _objects(_list(experiments, "recommended", "experiments", f), "experiments.recommended", f):
+        for cid in _list(rec, "claim_ids", f"experiments.recommended[{i}]", f):
             if cid not in seen:
                 f.warn(f"experiments.recommended[{i}]", f"unknown claim id {cid!r}")
 
@@ -409,15 +431,35 @@ def check(audit_dir):
     return f
 
 
+def _dicts(value):
+    return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
+
+
+def _strings(value):
+    return [x for x in value if isinstance(x, str)] if isinstance(value, list) else []
+
+
+def _field(d, key):
+    v = d.get(key)
+    return v if isinstance(v, dict) else {}
+
+
+def _evidence_locations(a):
+    locs = []
+    for ft in _dicts(a.get("features")):
+        locs += _strings(ft.get("locations"))
+    for c in _dicts(a.get("claims")):
+        locs += _strings(c.get("implementation_evidence"))
+    return locs
+
+
 def _all_locations(a):
-    locs = list((a.get("activation") or {}).get("evidence") or [])
-    for ft in a.get("features") or []:
-        locs += ft.get("locations") or []
-    for c in a.get("claims") or []:
-        locs += [c.get("source")] + (c.get("implementation_evidence") or []) + (c.get("experimental_evidence_locations") or [])
-    locs += (a.get("minimal_prompt") or {}).get("derived_from") or []
-    locs += [n.get("location") for n in a.get("security_notes") or [] if isinstance(n, dict)]
-    return [l for l in locs if isinstance(l, str)]
+    locs = _strings(_field(a, "activation").get("evidence")) + _evidence_locations(a)
+    for c in _dicts(a.get("claims")):
+        locs += _strings([c.get("source")]) + _strings(c.get("experimental_evidence_locations"))
+    locs += _strings(_field(a, "minimal_prompt").get("derived_from"))
+    locs += _strings([n.get("location") for n in _dicts(a.get("security_notes"))])
+    return locs
 
 
 def _esc(s):
@@ -449,7 +491,7 @@ def _fence(text):
 
 
 def _locs(locs):
-    return ", ".join(_code(l) for l in locs) if locs else ""
+    return ", ".join(_code(loc) for loc in locs) if locs else ""
 
 
 def _bullets(items, none):
@@ -630,57 +672,77 @@ def skeleton(audit_dir, model, runtime):
 
 
 def _files_of(locs):
-    return {l.rsplit(":", 1)[0] for l in locs if isinstance(l, str) and ":" in l}
+    return {loc.rsplit(":", 1)[0] for loc in locs if isinstance(loc, str) and ":" in loc}
 
 
-def _lines_of(locs):
-    out = set()
-    for l in locs:
-        if not isinstance(l, str) or ":" not in l:
+def _line_ranges(locs):
+    by_path = {}
+    for loc in locs:
+        if not isinstance(loc, str) or ":" not in loc:
             continue
-        path, rng = l.rsplit(":", 1)
+        path, rng = loc.rsplit(":", 1)
         start, _, end = rng.partition("-")
         try:
             s, e = int(start), int(end or start)
         except ValueError:
             continue
-        out |= {(path, n) for n in range(s, e + 1)}
-    return out
+        if s <= e:
+            by_path.setdefault(path, []).append((s, e))
+    merged = {}
+    for path, ranges in by_path.items():
+        out = []
+        for s, e in sorted(ranges):
+            if out and s <= out[-1][1] + 1:
+                out[-1] = (out[-1][0], max(out[-1][1], e))
+            else:
+                out.append((s, e))
+        merged[path] = out
+    return merged
+
+
+def _range_size(ranges):
+    return sum(e - s + 1 for path in ranges.values() for s, e in path)
+
+
+def _range_overlap(x, y):
+    total = 0
+    for path in x.keys() & y.keys():
+        a, b, i, j = x[path], y[path], 0, 0
+        while i < len(a) and j < len(b):
+            total += max(0, min(a[i][1], b[j][1]) - max(a[i][0], b[j][0]) + 1)
+            if a[i][1] < b[j][1]:
+                i += 1
+            else:
+                j += 1
+    return total
 
 
 def _jaccard(x, y):
     return 1.0 if not x and not y else len(x & y) / len(x | y)
 
 
+def _lines_jaccard(la, lb):
+    x, y = _line_ranges(la), _line_ranges(lb)
+    inter = _range_overlap(x, y)
+    union = _range_size(x) + _range_size(y) - inter
+    return 1.0 if not union else inter / union
+
+
+def _dist(values):
+    return dict(sorted(Counter(values).items(), key=lambda kv: str(kv[0])))
+
+
 def diff(a_path, b_path):
     a, b = load_json(a_path), load_json(b_path)
-    def locs(d):
-        r = []
-        for ft in d.get("features", []):
-            r += ft.get("locations", [])
-        for c in d.get("claims", []):
-            r += c.get("implementation_evidence", [])
-        return r
-    def dist(d, kind, key):
-        out = {}
-        for x in d.get(kind, []):
-            out[x.get(key)] = out.get(x.get(key), 0) + 1
-        return dict(sorted(out.items(), key=lambda kv: str(kv[0])))
-    def dist_axis(d, axis):
-        out = {}
-        for c in d.get("claims", []):
-            v = (c.get("assessment") or {}).get(axis)
-            out[v] = out.get(v, 0) + 1
-        return dict(sorted(out.items(), key=lambda kv: str(kv[0])))
-    la, lb = locs(a), locs(b)
+    la, lb = _evidence_locations(a), _evidence_locations(b)
     return {
         "features": [len(a.get("features", [])), len(b.get("features", []))],
         "claims": [len(a.get("claims", [])), len(b.get("claims", []))],
         "cited_files_jaccard": round(_jaccard(_files_of(la), _files_of(lb)), 3),
-        "cited_lines_jaccard": round(_jaccard(_lines_of(la), _lines_of(lb)), 3),
+        "cited_lines_jaccard": round(_lines_jaccard(la, lb), 3),
         "feature_categories": [sorted({c for f in d.get("features", []) for c in f.get("categories", [])}) for d in (a, b)],
-        "substitutability": [dist(a, "features", "substitutability"), dist(b, "features", "substitutability")],
-        "claim_assessments": {x: [dist_axis(a, x), dist_axis(b, x)] for x in AXES},
+        "substitutability": [_dist(f.get("substitutability") for f in d.get("features", [])) for d in (a, b)],
+        "claim_assessments": {x: [_dist((c.get("assessment") or {}).get(x) for c in d.get("claims", [])) for d in (a, b)] for x in AXES},
         "conclusion": [a.get("conclusion", {}).get("verdicts"), b.get("conclusion", {}).get("verdicts")],
     }
 

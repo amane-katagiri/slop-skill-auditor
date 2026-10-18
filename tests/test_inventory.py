@@ -209,17 +209,22 @@ class ContextAndReviewTests(unittest.TestCase):
 
 
 class MissingScopeTests(unittest.TestCase):
-    def test_project_root_tests_do_not_produce_missing_refs(self):
-        inv = build_inventory(ROOT, str(ROOT))
+    def test_non_skill_dirs_do_not_produce_missing_refs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp, "x")
+            for sub in ("tests/fixtures/skills/demo", "test", "examples", "scripts"):
+                (d / sub).mkdir(parents=True)
+            Path(d, "SKILL.md").write_text("---\nname: x\ndescription: d\n---\nRun `scripts/run.sh`.\n")
+            Path(d, "scripts", "run.sh").write_text("echo ok\n")
+            Path(d, "tests", "test_x.py").write_text("open('fixtures/skills/demo/gone.md')\n")
+            Path(d, "tests", "fixtures", "skills", "demo", "SKILL.md").write_text("See references/absent.md\n")
+            Path(d, "test", "helper.py").write_text("p = 'data/none.json'\n")
+            Path(d, "examples", "demo.sh").write_text("python3 scripts/missing.py\n")
+            inv = build_inventory(d, str(d))
         self.assertIn("review_targets", inv["missing_references_scope"])
-        bad = [m for m in inv["missing_references"]
-               if {"tests", "test", "fixtures", "examples"} & set(m["from"].split("/")[:-1])]
-        self.assertEqual(bad, [])
-        self.assertTrue(any(r["from"].startswith("tests/") for r in inv["references"]))
-
-    def test_missing_impl_still_reported(self):
-        targets = {m["target"] for m in inv_of("missing-impl")["missing_references"]}
-        self.assertEqual(targets, {"scripts/changelog.py", "references/style.md"})
+        self.assertEqual(inv["missing_references"], [])
+        unresolved = {r["from"] for r in inv["references"] if not r["exists"]}
+        self.assertEqual(unresolved, {"tests/test_x.py", "tests/fixtures/skills/demo/SKILL.md", "test/helper.py", "examples/demo.sh"})
 
     def test_unreachable_test_dir_excluded_but_reachable_kept(self):
         with tempfile.TemporaryDirectory() as tmp:

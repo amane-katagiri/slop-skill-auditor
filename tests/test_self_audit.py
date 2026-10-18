@@ -19,8 +19,9 @@ def inventory_of_self():
 
 
 class SelfAuditStaticTest(unittest.TestCase):
-    def setUp(self):
-        self.inv = inventory_of_self()
+    @classmethod
+    def setUpClass(cls):
+        cls.inv = inventory_of_self()
 
     def test_spec_checks_have_no_errors(self):
         failed = [c for c in self.inv["spec_checks"] if c["level"] == "error" and not c["ok"]]
@@ -44,8 +45,6 @@ class SelfAuditStaticTest(unittest.TestCase):
 
 @unittest.skipUnless((SELF_SAMPLE / "audit.json").exists(), "self-audit sample not generated")
 class SelfAuditSampleTest(unittest.TestCase):
-    """The auditor must be able to audit itself and must not award itself unearned credit."""
-
     def setUp(self):
         self.audit = json.loads((SELF_SAMPLE / "audit.json").read_text(encoding="utf-8"))
 

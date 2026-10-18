@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 
@@ -8,6 +9,9 @@ PROVENANCE_SCHEMA = "slop-skill-auditor/provenance@1"
 INVENTORY_SCHEMA = "slop-skill-auditor/inventory@1"
 SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__"}
 TEXT_MAX_BYTES = 5 * 1024 * 1024
+SCRIPT_EXTS = {
+    ".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd", ".lua", ".go", ".rs",
+}
 
 _LOC_RE = re.compile(r"^(.+?):(\d+)(?:-(\d+))?$")
 
@@ -17,14 +21,14 @@ def load_json(path):
         return json.load(f)
 
 
-def dump_json(data):
-    return json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+def dump_json(data, sort_keys=True):
+    return json.dumps(data, sort_keys=sort_keys, ensure_ascii=False, indent=2) + "\n"
 
 
-def write_json(path, data):
+def write_json(path, data, sort_keys=True):
     tmp = str(path) + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(dump_json(data))
+        f.write(dump_json(data, sort_keys))
     os.replace(tmp, path)
 
 
@@ -45,20 +49,32 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-def read_text(path):
-    """Return decoded text, or None if the file looks binary or is too large."""
-    st = os.lstat(path)
-    if not stat.S_ISREG(st.st_mode) or st.st_size > TEXT_MAX_BYTES:
-        return None
-    with open(path, "rb") as f:
-        data = f.read()
+def decode_text(data):
     if b"\x00" in data[:8192]:
         return None
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    return text[1:] if text.startswith("﻿") else text
+    return text[1:] if text.startswith("\ufeff") else text
+
+
+def read_text(path):
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or st.st_size > TEXT_MAX_BYTES:
+        return None
+    with open(path, "rb") as f:
+        return decode_text(f.read())
+
+
+def is_script_file(path, executable, shebang):
+    return bool(executable or shebang or os.path.splitext(path)[1].lower() in SCRIPT_EXTS)
+
+
+def is_repo_doc(rel_dir, name):
+    up = name.upper()
+    return up.startswith("README") or up.startswith("CHANGELOG") or (
+        posixpath.basename(rel_dir) == "docs" and name.lower().endswith(".md"))
 
 
 def _within(base, path):
@@ -67,57 +83,81 @@ def _within(base, path):
     return real == base or real.startswith(base + os.sep)
 
 
+def skill_label(prov):
+    if not prov.get("source_root") or prov.get("skill_subpath") is None:
+        raise ValueError("provenance.json has no resolved skill; rerun fetch_target.py with --skill")
+    return posixpath.normpath(posixpath.join(prov["source_root"], prov["skill_subpath"]))
+
+
 def audit_roots(audit_dir):
-    """Return (skill_root, source_root, docs_root) as absolute paths for an audit dir."""
     audit_dir = os.path.abspath(audit_dir)
     prov_path = os.path.join(audit_dir, "provenance.json")
     if not os.path.isfile(prov_path):
         raise ValueError("no provenance.json in %s" % audit_dir)
     prov = load_json(prov_path)
-    if not prov.get("source_root") or prov.get("skill_subpath") is None:
-        raise ValueError("provenance.json has no resolved skill (ambiguous candidates?)")
+    skill_root = os.path.normpath(os.path.join(audit_dir, skill_label(prov)))
     source_root = os.path.normpath(os.path.join(audit_dir, prov["source_root"]))
-    skill_root = os.path.normpath(os.path.join(source_root, prov["skill_subpath"]))
     return skill_root, source_root, os.path.join(audit_dir, "docs")
 
 
-def resolve_location(audit_dir, loc):
-    """Resolve `path:LINE`, `path:START-END` or bare `path` (skill-root relative,
-    `@repo/` for source root, `@docs/` for user docs) to (abs_path, start, end).
-    A bare path returns (abs_path, None, None)."""
-    if not isinstance(loc, str) or not loc.strip():
-        raise ValueError("empty location")
-    loc = loc.strip()
-    m = _LOC_RE.match(loc)
-    if m:
-        rel, start, end = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))
-    else:
-        rel, start, end = loc, None, None
-    skill_root, source_root, docs_root = audit_roots(audit_dir)
-    if rel.startswith("@repo/"):
-        base, rel = source_root, rel[len("@repo/"):]
-    elif rel.startswith("@docs/"):
-        base, rel = docs_root, rel[len("@docs/"):]
-    else:
-        base = skill_root
-    if not rel or rel.startswith("/") or os.path.isabs(rel):
-        raise ValueError("bad path in location: %r" % loc)
-    path = os.path.normpath(os.path.join(base, rel))
-    if not _within(base, path):
-        raise ValueError("location escapes its root: %r" % loc)
-    if not os.path.isfile(path):
-        raise ValueError("no such file: %r" % loc)
-    if start is None:
-        return path, None, None
+def count_lines(path):
     n, last = 0, b"\n"
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 16), b""):
             n += chunk.count(b"\n")
             last = chunk[-1:]
-    n += last != b"\n"
-    if start < 1 or end < start or end > n:
-        raise ValueError("line range %d-%d out of range for %r (%d lines)" % (start, end, loc, n))
-    return path, start, end
+    return n + (last != b"\n")
+
+
+class LocationResolver:
+    def __init__(self, audit_dir):
+        self.audit_dir = audit_dir
+        self._roots = None
+        self._line_counts = {}
+
+    def roots(self):
+        if self._roots is None:
+            self._roots = audit_roots(self.audit_dir)
+        return self._roots
+
+    def line_count(self, path):
+        if path not in self._line_counts:
+            self._line_counts[path] = count_lines(path)
+        return self._line_counts[path]
+
+    def __call__(self, loc):
+        if not isinstance(loc, str) or not loc.strip():
+            raise ValueError("empty location")
+        loc = loc.strip()
+        m = _LOC_RE.match(loc)
+        if m:
+            rel, start, end = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2))
+        else:
+            rel, start, end = loc, None, None
+        skill_root, source_root, docs_root = self.roots()
+        if rel.startswith("@repo/"):
+            base, rel = source_root, rel[len("@repo/"):]
+        elif rel.startswith("@docs/"):
+            base, rel = docs_root, rel[len("@docs/"):]
+        else:
+            base = skill_root
+        if not rel or rel.startswith("/") or os.path.isabs(rel):
+            raise ValueError("bad path in location: %r" % loc)
+        path = os.path.normpath(os.path.join(base, rel))
+        if not _within(base, path):
+            raise ValueError("location escapes its root: %r" % loc)
+        if not os.path.isfile(path):
+            raise ValueError("no such file: %r" % loc)
+        if start is None:
+            return path, None, None
+        n = self.line_count(path)
+        if start < 1 or end < start or end > n:
+            raise ValueError("line range %d-%d out of range for %r (%d lines)" % (start, end, loc, n))
+        return path, start, end
+
+
+def resolve_location(audit_dir, loc):
+    return LocationResolver(audit_dir)(loc)
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.\-]*)\s*:(?:\s+(.*)|\s*)$")

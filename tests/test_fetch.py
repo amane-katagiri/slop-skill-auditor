@@ -79,6 +79,13 @@ class GithubUrlTests(unittest.TestCase):
         with self.assertRaises(FetchError):
             split_ref_path("nope/skills/a", refs)
 
+    def test_candidates_under_subpath(self):
+        cands = ["-x", "a", "a/-b", "a/b", "ab", "c/a"]
+        self.assertEqual(fetch_target.candidates_under(cands, "."), cands)
+        self.assertEqual(fetch_target.candidates_under(cands, "a"), ["-b", ".", "b"])
+        self.assertEqual(fetch_target.candidates_under(cands, "a/b"), ["."])
+        self.assertEqual(fetch_target.candidates_under(cands, "z"), [])
+
     def test_offline_rejects_github(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = run("fetch_target.py", "https://github.com/o/r/tree/main/x", "--out", tmp, "--offline")
