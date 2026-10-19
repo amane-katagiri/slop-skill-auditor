@@ -62,7 +62,7 @@ GitHub 上のスキルを監査させる場合は、エージェントに自分�
 [Skills CLI](https://skills.sh) で入れられます。
 
 ```sh
-npx skills add <owner>/slop-skill-auditor
+npx skills add amane-katagiri/slop-skill-auditor
 ```
 
 手動で入れる場合は、`skills/slop-skill-auditor/` をスキルの置き場所（Claude Code なら `~/.claude/skills/slop-skill-auditor/` やプロジェクトの `.claude/skills/slop-skill-auditor/`）にコピーしてください。リポジトリ全体をコピーする必要はありません。`tests/` には、監査の検証用に悪意のあるスキルの見本が入っているので、スキルの置き場所には入れないでください。
