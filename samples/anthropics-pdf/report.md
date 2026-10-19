@@ -1,239 +1,282 @@
 # スキル監査レポート: pdf
 
-## 監査対象と条件
+## 結論
 
-- input: `https://github.com/anthropics/skills/tree/main/skills/pdf`
-- kind: `github_tree`
-- repo: `https://github.com/anthropics/skills.git`
+独自の価値はあるが効果は未確認
+
+- フォーム入力の部分には、欄情報の抽出・値の検証・座標変換・重なり検査をコードで行う独自の実装と、確認工程を含む手順がある。
+- スキルの分量の大半を占める一般的なPDF操作のコード例は、素のモデルでも書ける一般的な知識と考えられる。
+- スキャンPDFを検索可能にするという記述は実装が足りない。フォーム手順の最初のコマンドにも誤りがある。
+- 効果の測定データはなく、この監査でも実験していないため、独自価値の効果は未検証。
+
+## 要約
+
+- 目的: PDFに関するあらゆる作業（抽出・結合・分割・回転・透かし・作成・フォーム入力・暗号化・画像抽出・OCR）を、PythonライブラリとCLIツールで行わせるための手引き。
+- 実際にしていること: 中身は大きく2つに分かれる。1つはpypdf・pdfplumber・reportlab・qpdfなどの定番コード例の集まりで、多くは一般に知られた使い方である。もう1つはPDFフォーム入力の手順書と6本の補助スクリプトで、入力欄のあるフォームとないフォームで手順を分け、値の検証・座標の変換・重なりの検査・画像での確認までを決めている。
+- 独自の実装や外部の仕組み: 独自の実装はフォーム入力まわりに集中している。入力欄の一覧化（チェックボックスのオン値、ラジオボタンの選択肢、選択リストの候補を含む）、入力値の事前検証、入力欄のないフォームへの注釈での書き込みと座標変換、入力位置の重なり検査がスクリプトとして同梱されている。外部サービスやネットワークは使わない。
+- 期待できる効果: フォーム入力では、手順の強制と値の検証によって、誤った欄名や無効なチェック値での失敗を減らせると見込まれる。それ以外の一般的なPDF操作では、素のモデルとの差は小さいと考えられる。どちらも実験では確かめていない。
+- 宣伝との一致: 宣伝はおおむね実装と整合する。ただしスキャンPDFのOCRは「検索可能にする」と書かれているのに、手順はテキストを取り出すだけで、検索可能なPDFは作らない。効果を示す測定データはリポジトリにない。
+- まだ分からないこと:
+  - フォーム手順の最初のコマンドは拡張子の「.py」が抜けており、書かれたとおりには動かない。エージェントが自分で直せるかは未確認。
+  - 入力欄のないフォームへの書き込みは注釈として追加され、表示用の画像を持たない。閲覧ソフトや画像変換ツールで正しく表示されるかは未確認。
+  - 注釈の既定フォントがArialで、日本語など英字以外の文字が表示されるかは未確認。
+  - 一般的なPDF操作の部分は、素のモデルでも同じ品質で書けるか未確認。
+  - スキルのライセンスは複製や外部での保持を禁じており、GitHubから取得して自分の環境に入れる使い方が許されるかは利用者の契約次第。
+
+## このスキルがしていること
+
+いつ使われるか: descriptionに「PDFで何かをしたいときは常に使う」「.pdfファイルに触れたり作成を頼まれたら使う」と書かれており、発火条件は非常に広い。PDFの名前が出るだけで本文（約2000トークン）が読み込まれうる。起動を制限する設定項目はない。配布はdocx・xlsx・pptxと一緒の文書スキル用プラグインとして行われ、プラグインにhooksやMCPサーバーは含まれない。
+根拠: `SKILL.md` 1〜5行、`@repo/.claude-plugin/marketplace.json` 12〜23行
+
+| 機能 | スキルなしで足りるか | 確かさ |
+|---|---|---|
+| 一般的なPDF操作のコード例集 | 素のモデルで足りそう（推測） | 中 |
+| reportlabの下付き・上付き文字の注意 | 短い指示で足りそう（推測） | 中 |
+| 入力欄のあるフォームの入力手順とスクリプト | スキル固有の価値あり（実装で確認） | 中 |
+| 入力欄のないフォームへの書き込み手順とスクリプト | スキル固有の価値あり（実装で確認） | 中 |
+| 応用リファレンス | 素のモデルで足りそう（推測） | 中 |
+
+### 一般的なPDF操作のコード例集
+
+pypdfでの結合・分割・メタデータ・回転・透かし・暗号化、pdfplumberでのテキストと表の抽出、reportlabでのPDF作成、pdftotext・qpdf・pdftk・pdfimagesのコマンド例、pytesseractでのOCRを、短いコード片で示す。末尾に作業ごとの推奨ツール表がある。
+期待される効果: 作業ごとに使うライブラリが迷わず決まり、動くコードを早く書ける。
+使う外部の仕組み: pypdf・pdfplumber・reportlab・pandas・pytesseract・pdf2imageなどのPythonライブラリ（同梱なし）, poppler-utils・qpdf・pdftk・tesseractなどのCLI（同梱なし）
+判断の理由: どれも各ライブラリの基本的な使い方で、固有の情報は含まない。ツールの選び方を揃える効果はありうる。依存ライブラリの導入手順はOCRの1行しかなく、環境に入っていなければ動かない。
+種類: 知識。
+根拠: `SKILL.md` 13〜167, 189〜307行
+
+### reportlabの下付き・上付き文字の注意
+
+reportlabの標準フォントには下付き・上付きのUnicode文字の字形がなく黒い四角になるため、Unicode文字を使わずタグで書くよう指示する。
+期待される効果: 化学式や数式を含むPDFで文字化けを防ぐ。
+判断の理由: モデルが自分からは避けない可能性のある具体的な落とし穴で、価値はある。ただし内容は1〜2行の指示で伝えられる。
+種類: 知識、指示。
+根拠: `SKILL.md` 169〜187行
+
+### 入力欄のあるフォームの入力手順とスクリプト
+
+まず入力欄の有無を判定する。次に全入力欄をJSONに書き出す。欄の種類、ページ、位置、チェックボックスのオン値とオフ値、ラジオボタンの選択肢、選択リストの候補を含む。ページを画像にして各欄の意味を読み取らせ、入力値のJSONを作らせる。入力スクリプトは欄名・ページ番号・選択肢の値を検証し、誤りがあれば止まってから書き込む。選択リストの候補を扱うためにpypdfの関数を一時的に差し替えている。
+期待される効果: 存在しない欄名や無効なチェック値での入力を事前に防ぎ、フォーム入力の失敗を減らす。
+使う外部の仕組み: pypdf, pdf2image（popplerが必要）
+判断の理由: 検証と欄情報の抽出はコードで決定的に行われる。素のモデルも同等のコードは書けるが、ラジオボタンや選択リストまで毎回正しく扱えるかは保証されない（推論）。値は画面表示を閲覧ソフト側で作り直す設定で書き込まれるため、閲覧ソフトによっては表示が変わる可能性がある（推論）。最初の判定コマンドは拡張子が抜けている。チェックボックスの状態が2つでない場合、オン値が記録されず、入力スクリプトの検証で例外になる。
+種類: 手順、ツール、アルゴリズム。
+根拠: `forms.md` 1〜76行、`scripts/check_fillable_fields.py` 7〜11行、`scripts/extract_form_field_info.py` 9〜107行、`scripts/fill_fillable_fields.py` 11〜87行、`scripts/convert_pdf_to_images.py` 9〜24行
+
+### 入力欄のないフォームへの書き込み手順とスクリプト
+
+まずpdfplumberで単語・横線・小さな正方形（チェックボックス候補）の座標を抽出し、それを基に入力位置を計算させる。文字情報がないスキャンPDFでは、ページ画像を切り抜いて拡大し、位置を目で詰める手順を指示する。両者の混在時の座標換算式も示す。入力位置の重なりと、文字サイズに対する高さ不足をスクリプトで検査し、座標系を自動判定して注釈として文字を書き込む。最後にページを画像にして配置を確認させる。
+期待される効果: 入力欄のないPDFでも、目分量より正確な位置に文字を置き、重なりや見切れを事前に見つける。
+使う外部の仕組み: pdfplumber, pypdf, pdf2image（popplerが必要）, ImageMagick（切り抜き用、同梱なし）
+判断の理由: 座標の上下反転や画像との縮尺換算はモデルが間違えやすい処理で、それをコードが受け持つ。確認工程も強制されている。ただし画像は長辺1000ピクセルに縮小されるため、拡大による位置の詰めには精度の上限がある。入力位置の決定そのものはモデルの読み取りに委ねられている。手順書の中で「PDF座標」という語が、原点が下の座標と上の座標の両方に使われており、混乱の元になりうる。入力位置の枠を画像に描き込む検証用スクリプトも同梱されているが、手順書のどこからも呼ばれておらず、使われない可能性が高い。
+種類: 手順、ツール、アルゴリズム。
+根拠: `forms.md` 78〜294行、`scripts/extract_form_structure.py` 20〜88行、`scripts/check_bounding_boxes.py` 15〜56行、`scripts/fill_pdf_form_with_annotations.py` 10〜96行、`scripts/convert_pdf_to_images.py` 9〜24行、`scripts/create_validation_image.py` 9〜26行
+
+### 応用リファレンス
+
+pypdfium2での描画、JavaScriptのpdf-libとpdf.js、popplerとqpdfの応用コマンド、pdfplumberの座標付き抽出、reportlabの表、一括処理、切り抜き、性能の注意、トラブル対処を並べる。
+期待される効果: 基本手順で足りない場面の選択肢を示す。
+使う外部の仕組み: pypdfium2・pdf-lib・pdfjs-distなど（同梱なし）
+判断の理由: 一般的なライブラリの使い方が中心で、固有の情報はほぼない。図の抽出例は途中で終わっていて実装がない。いくつかの記述は疑わしい。座標付き出力の pdftotext を「最速のプレーンテキスト抽出」としている点、破損修復に QDF 形式用のオプションを挙げている点、フォーム入力に pdf-lib を勧めながら手順書は pypdf だけを使う点である（いずれも推論）。
+種類: 知識。
+根拠: `reference.md` 1〜612行、`SKILL.md` 309〜314行
+
+## 宣伝の確認
+
+### 「reading or extracting text/tables from PDFs, combining or m…」
+
+> 「reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, ... encrypting/decrypting PDFs, extracting images」
+> 出典: `SKILL.md` 3行
+
+- 仕組み: 実装を確認できた。
+- 効果: 測定はない。
+- 宣伝の強さ: 実装と根拠に見合っている。
+- 代わりになるか: 素のモデルで足りそう（推測）。
+- 確かさ: 中。
+
+主張している効果: 列挙されたPDF操作をこなせる。
+説明されている仕組み: 各操作のコード例とコマンド例を示す。
+実装との照合: 列挙された操作すべてにコード例がある。どれも一般的なライブラリの基本的な使い方。
+補足: 機能の一覧として控えめな書き方で、実装と見合う。依存ライブラリとCLIの導入は利用者の環境任せで、前提としての説明はない。
+根拠: `SKILL.md` 30〜167, 189〜229, 252〜294行
+
+### 「OCR on scanned PDFs to make them searchable」
+
+> 出典: `SKILL.md` 3行
+
+- 仕組み: 実装は一部だけ。
+- 効果: 測定はない。
+- 宣伝の強さ: 実装と根拠に比べてやや強い。
+- 代わりになるか: 素のモデルで足りそう（推測）。
+- 確かさ: 中。
+
+主張している効果: スキャンPDFにOCRをかけて検索可能にする。
+説明されている仕組み: pdf2imageで画像にし、pytesseractで文字を読み取る。
+実装との照合: 読み取った文字を画面に出す手順だけで、文字の層を重ねた検索可能なPDFを作る手順はない。
+補足: 「検索可能にする」とテキストの取り出しには差がある。検索可能なPDFを作るには、pytesseractのPDF出力やocrmypdfなど、本文にない手段が要る。tesseract本体の導入にも触れていない。
+根拠: `SKILL.md` 233〜250行、`reference.md` 589〜601行
+
+### 「filling PDF forms」
+
+> 出典: `SKILL.md` 3行
+
+- 仕組み: 実装を確認できた。
+- 効果: 測定はない。
+- 宣伝の強さ: 実装と根拠に見合っている。
+- 代わりになるか: スキル固有の価値あり（推測）。
+- 確かさ: 中。
+
+主張している効果: PDFフォームに正しく入力できる。
+説明されている仕組み: 入力欄の有無で分岐する手順書と、欄情報の抽出・値の検証・座標変換・重なり検査・注釈書き込みのスクリプト。
+実装との照合: 仕組みは実装されている。最初の判定コマンドは拡張子が抜けていて書かれたとおりには動かない。判定スクリプト自体は存在する。
+補足: このスキルの価値の中心。入力結果が閲覧ソフトでどう表示されるか、英字以外の文字が出るかは未確認。
+根拠: `forms.md` 1〜294行、`scripts/extract_form_field_info.py` 47〜107行、`scripts/fill_fillable_fields.py` 11〜71行、`scripts/fill_pdf_form_with_annotations.py` 10〜96行、`scripts/check_bounding_boxes.py` 15〜56行、`scripts/extract_form_structure.py` 20〜88行
+
+### 「Use the PDF skill to extract the form fields from `path/to/…」
+
+> 「Use the PDF skill to extract the form fields from `path/to/some-file.pdf`」
+> 出典: `@repo/README.md` 51行
+
+- 仕組み: 実装を確認できた。
+- 効果: 測定はない。
+- 宣伝の強さ: 実装と根拠に見合っている。
+- 代わりになるか: スキル固有の価値あり（推測）。
+- 確かさ: 中。
+
+主張している効果: PDFのフォーム欄を抽出できる。
+説明されている仕組み: 入力欄の一覧をJSONに書き出すスクリプト。
+実装との照合: 欄の種類・ページ・位置・チェック値・選択肢を書き出す。位置が分からない欄は警告を出して除外する。入力欄のないフォームは対象外で、その場合は別スクリプトが単語と線の座標を出す。
+補足: 利用例として書かれているだけで、強い効果の主張ではない。
+根拠: `scripts/extract_form_field_info.py` 9〜122行、`forms.md` 8〜52行
+
+### 「the document creation &amp; editing skills that power Claude's …」
+
+> 「the document creation &amp; editing skills that power Claude's document capabilities under the hood ... actively used in a production AI application」
+> 出典: `@repo/README.md` 20行
+
+- 仕組み: 実装で確かめる種類の主張ではない。
+- 効果: 確かめようがない。
+- 宣伝の強さ: 判断できない。
+- 代わりになるか: 判断できない（未確認）。
+- 確かさ: 低。
+
+主張している効果: Claudeの文書機能を実際に支えている本番用のスキルである。
+説明されている仕組み: 説明なし。
+実装との照合: 出自についての主張で、リポジトリ内のファイルからは確かめられない。直後の免責文は、実際の挙動がこのスキルと異なる場合があると述べている。
+補足: 品質の根拠にはしない。免責文があるため、本番で使われていることがこの版の品質を保証するとは読めない。
+
+### 「Skills ... improve performance on specialized tasks ... in …」
+
+> 「Skills ... improve performance on specialized tasks ... in a repeatable way」
+> 出典: `@repo/README.md` 6行
+
+- 仕組み: 実装は一部だけ。
+- 効果: 測定はない。
+- 宣伝の強さ: 実装と根拠に見合っている。
+- 代わりになるか: 判断できない（推測）。
+- 確かさ: 低。
+
+主張している効果: 専門的な作業の成績が上がり、再現性が高まる。
+説明されている仕組み: 指示・スクリプト・資料を読み込ませる（リポジトリ全体の一般論）。
+実装との照合: 再現性に効きうる仕組みはフォーム入力の部分にある（手順の強制、コードでの検証）。一般操作の部分はコード例を示すだけ。
+補足: リポジトリ全体に向けた一般的な説明で、このスキルについての定量的な主張はない。測定データも公開されていない。
+根拠: `forms.md` 1行、`scripts/fill_fillable_fields.py` 28〜43行、`scripts/check_bounding_boxes.py` 15〜56行
+
+## スキルなしで足りるか
+
+素のモデルでできそうなこと:
+
+- pypdf・pdfplumber・reportlab・qpdfなどによる結合・分割・回転・抽出・作成・暗号化の基本コード例
+- pypdfium2・pdf-lib・pdf.jsなどの応用リファレンス
+
+短い指示で足りそうなこと:
+
+- reportlabで下付き・上付きのUnicode文字を使わずタグで書くという注意
+- 作業ごとの推奨ツールの表
+
+スキル固有の価値:
+
+- 入力欄の一覧化と入力値の事前検証（チェックボックス・ラジオボタン・選択リストを含む）
+- 入力欄のないフォームへの書き込みにおける座標の自動判定・変換と、入力位置の重なり検査
+- フォーム入力時の手順の強制（判定→抽出→画像確認→検証→入力→画像で最終確認）
+
+不要・重複していそうな部分:
+
+- どこからも参照されない検証用画像の作成スクリプト
+- 途中で終わっていて動かない図の抽出例
+
+確かめられていないこと:
+
+- 注釈での書き込みや画面表示の作り直しを閲覧ソフト任せにした入力結果が、どの閲覧ソフトでも正しく表示されるか
+- 英字以外の文字（日本語など）でのフォーム入力
+- スキル全体が素のモデルや最小指示より良い結果を出すか
+
+### 比較用の短い指示
+
+目的だけを普通に頼んだ場合の指示。実験ではこれをスキルと比べる。
+
+```text
+このPDFファイルについて、頼んだ作業をやってください（例: テキストや表の抽出、複数PDFの結合・分割、ページの回転、透かしの追加、新しいPDFの作成、フォームの入力、暗号化・復号、画像の抽出、スキャンPDFのOCR）。PythonやCLIツールを使ってかまいません。結果は新しいPDFまたはテキスト/JSONファイルとして保存してください。
+```
+
+この指示では再現できないこと:
+
+- 入力欄の一覧化・入力値の検証・座標変換・重なり検査を行う同梱スクリプト
+- 入力欄の有無で分岐し、画像での確認を必須にするフォーム入力の手順
+- reportlabの下付き・上付き文字の落とし穴
+- 作業ごとに使うライブラリの指定（pypdf・pdfplumber・reportlab・qpdf）
+
+## 実験
+
+対照実験はしていない。実験で確かめるとよい点:
+
+- 入力欄のあるフォームでは、スキルを使うと最小指示より欄の取り違えや無効なチェック値が減る。 方法の案: チェックボックス・ラジオボタン・選択リストを含む申請書PDFに、指定した値を入力させ、全欄の値を機械的に照合する。（対象の宣伝: 「filling PDF forms」、「Use the PDF skill to extract the form f…」）
+- 入力欄のないフォームでは、スキルを使うと文字が正しい位置に収まる割合が上がる。 方法の案: 線と枠だけの申込書PDFに氏名・住所・チェックを書き込ませ、出力を画像にして位置のずれを測る。（対象の宣伝: 「filling PDF forms」）
+- スキルを使っても、スキャンPDFを検索可能なPDFにする作業では最小指示との差がない、または文字を取り出すだけで止まる。 方法の案: スキャン画像だけのPDFを「検索可能にして」と頼み、出力PDFに文字の層があるかを確かめる。（対象の宣伝: 「OCR on scanned PDFs to make them search…」）
+- 結合・分割・回転などの一般操作では、3条件で成果に差がない。 方法の案: 複数PDFの指定ページを抜き出して結合し、一部を回転させる作業を行わせ、ページ順と向きを機械的に確認する。（対象の宣伝: 「reading or extracting text/tables from …」）
+
+## 気になった点
+
+- ライセンスは独自のもので、サービス外での写しの保持、複製、改変物の作成、第三者への配布、リバースエンジニアリングを禁じている。GitHubから取得して自分の環境に入れたり改変したりする使い方が許されるかは、利用者とAnthropicとの契約による。 導入判断に関わる制約として記録した。法的な解釈はしていない。 根拠: `LICENSE.txt` 13〜24行
+- PDFのパスワードをコマンドライン引数で渡す例がある（応用リファレンスにも同様の例がある）。シェル履歴やプロセス一覧に残りうる。 副次的な所見として記録した。実行はしていない。 根拠: `SKILL.md` 216行
+- 「必ず順番どおりに」という強い指示はあるが、監査者やAIの評価を誘導する記述、外部への送信、インストールの自動実行は見つからなかった。スクリプトはローカルのファイルを読み書きするだけで、ネットワークは使わない。 データとして読み、スクリプトは実行しなかった。 根拠: `forms.md` 1行
+
+## 監査の条件と限界
+
+### 条件
+
+- 入力: `https://github.com/anthropics/skills/tree/main/skills/pdf`
+- 取得方法: GitHubのフォルダURL
+- リポジトリ: `https://github.com/anthropics/skills.git`
 - commit: `dbd4588f9e1033efb41dad4bef2f7947c8993d44`
-- skill_subpath: `skills/pdf`
-- fetched_at: `2026-10-17T19:05:01Z`
-- fingerprint: `e32d8fa5f3788208a3396065683a9ae8a768d9ca6a60b9617419eaff9515f099`
-- auditor.model: `claude-opus-5-5`
-- auditor.runtime: `Claude Code`
-- audit date: `2026-10-18`
+- スキルの場所: `skills/pdf`
+- 取得日時: `2026-10-18T19:31:02Z`
+- ファイルの指紋: `9cc34570c3784f44c87f7cb6b88fb29b25f8d9fef8f8e5544f98c58704701d1a`
+- 監査したモデル: `claude-opus-5-5`
+- 実行環境: Claude Code（バージョン未確認）
+- 監査日: `2026-10-19`
 
-## Summary
+### 限界
 
-- **主な目的**: PDFに関するあらゆる作業（テキスト/表の抽出、結合・分割・回転、透かし、新規作成、フォーム入力、暗号化/復号、画像抽出、OCR）をエージェントに行わせるための汎用ガイド（SKILL.md:3）。
-- **実際に行うこと**: 2層構成。(1) SKILL.md本文と reference.md は pypdf / pdfplumber / reportlab / qpdf / poppler / pdf-lib / pdfjs などの**コードスニペット集**で、実行可能な同梱ツールではない（SKILL.md:13-307, reference.md:1-612）。(2) forms.md は**PDFフォーム入力の強制ワークフロー**で、同梱スクリプト7本（フィールド列挙・値検証付き入力・非フィールドPDFのレイアウト抽出・bbox検査・注釈による書き込み・画像化）を手順どおりに呼ばせる（forms.md:1-294, scripts/）。
-- **独自の実装や外部能力**: フォーム入力まわりの決定的な処理: AcroFormフィールドの列挙（チェックボックスのon/off値、ラジオ、選択肢を含む）と値の事前検証（scripts/extract_form_field_info.py:19-107, scripts/fill_fillable_fields.py:25-71）、非フィールドPDFからのラベル・罫線・チェックボックス座標抽出（scripts/extract_form_structure.py:20-88）、bbox重なり/高さ検査（scripts/check_bounding_boxes.py:15-56）、画像座標⇔PDF座標の変換込みのFreeText注釈書き込み（scripts/fill_pdf_form_with_annotations.py:10-90）。外部API・MCPは使わない。依存ライブラリ/CLIは同梱されず、環境側に必要。
-- **期待できる付加価値**: フォーム入力では、座標系の取り違え・存在しないフィールドIDや不正なチェックボックス値の投入・文字の重なりといった典型的失敗を、手順とスクリプトで減らせると考えられる（inference、未検証）。それ以外の一般的PDF操作は、現行の有能なモデルが標準で知っている範囲のスニペットが大半で、付加価値は小さいと考えられる（inference）。ReportLabでのUnicode上付き/下付き文字が黒四角になる注意（SKILL.md:169-187）のような、小さいが具体的な落とし穴の知識もある。
-- **宣伝との整合性**: スキル自体には定量的な性能主張がない。descriptionの機能列挙はおおむね本文に対応するが、「OCRで検索可能にする」は本文ではOCRでテキストを取り出すだけで、検索可能PDF（テキスト層付き）を作る手順がない（SKILL.md:3 と SKILL.md:233-250）。reference.md の「pdf-libはフォーム構造をより良く保つ」はフォーム手順（pypdfのみ）と食い違い、根拠もない。リポジトリREADMEの「本番で使われている」は検証不能で、同READMEに挙動は異なりうるという免責がある。
-- **重要な疑問点**:
-  - フォーム入力ワークフローは、素のエージェントや最小指示と比べて実際に入力精度（正しいフィールド・正しい位置）を上げるか（未検証）。
-  - descriptionが「PDFが話題に出たら必ず」と非常に広いため、単にPDFを読むだけの依頼でも約300行の本文がロードされる。コンテキスト消費に見合うか（未検証）。
-  - 依存（pypdf, pdfplumber, reportlab, pdf2image+poppler, pytesseract+tesseract, qpdf, ImageMagick, Pillow）がない環境で、スキルがどの程度破綻・回復するか（未確認）。
+- 静的監査のみで、スクリプトもコード例も実行していない。依存ライブラリも導入していない。
+- 最小指示案はSKILL.mdのdescriptionとリポジトリのREADMEだけを読んで書いた。ただし監査者は事前にこのスキルについての一般的な知識を持っていた可能性がある。
+- pypdfやpopplerの挙動（注釈の描画、画面表示の再生成）に関する判断は監査者の知識による推論で、特定の版では確かめていない。
+- 同じリポジトリの他のスキル（docx・xlsx・pptxなど）は監査対象外。
+- スキルのライセンスは複製や外部での保持を制限している。監査のために取得した写しはこの監査ディレクトリにある。
 
-**起動条件**: frontmatterの description のみが選択条件。「PDFファイルで何かをしたいときは常に」「.pdfに言及したり作成を求めたら使え」と非常に広い（SKILL.md:3）。`disable-model-invocation` や `paths` 等の制限はない（SKILL.md:1-5）。PDF関連の依頼ではほぼ確実に選ばれる設計だが、PDFを読むだけの軽い依頼でも本文（314行）が読み込まれる可能性がある（inference）。forms.md・reference.md は本文から名前で参照されるのみで、必要時に読む段階的読み込み（SKILL.md:11, SKILL.md:309-314）。なお本文の参照は `REFERENCE.md` / `FORMS.md`（大文字）だが実ファイルは `reference.md` / `forms.md`（小文字）で、大文字小文字を区別するファイルシステムでは参照名と実ファイル名が一致しない。 `SKILL.md:1-5`, `SKILL.md:11`, `SKILL.md:307-314`
-
-## Implementation
-
-| 機能 | 実際の処理 | 実装場所 | モデルだけで代替できるか |
-|---|---|---|---|
-| F1 一般的PDF操作のスニペット集（pypdf / pdfplumber / reportlab / CLI） | 読み込み・テキスト抽出・結合・分割・メタデータ・回転・表抽出（pandas/Excel出力）・reportlabでの作成・pdftotext/qpdf/pdftk・透かし・画像抽出・暗号化のコード例を並べる。手順の強制や分岐はなく、参考例の提示のみ。透かしは既存の watermark.pdf を前提とし、その作り方はない（SKILL.md:256-257）。 | `SKILL.md:13-167`, `SKILL.md:189-294` | モデル標準能力で代替可能と考えられる (推論による仮説 / 確信度: 中) |
-| F2 上級リファレンス（pypdfium2 / pdf-lib / pdfjs / qpdf・poppler上級 / トラブルシュート） | 追加ライブラリと上級CLIオプションの例。図抽出の例は途中で終わっている（reference.md:453-460「implementation depends on specific needs」）。一部の記述は疑わしい: `qpdf --fix-qdf` を破損PDFの修復として挙げているが、fix-qdf は qpdf のオプションではなくQDF形式用の別コマンドと考えられる（reference.md:323-325）。`pdftotext -bbox-layout` を「プレーンテキスト抽出で最速」としているが、このオプションは座標付きXHTMLを出すもの（reference.md:536）。いずれも監査者の知識による inference で、実行確認はしていない。 | `reference.md:5-341`, `reference.md:343-601` | モデル標準能力で代替可能と考えられる (推論による仮説 / 確信度: 中) |
-| F3 ReportLabの上付き/下付き文字の落とし穴 | Unicodeの上付き/下付き文字は標準フォントにグリフがなく黒四角になるので使うな、Paragraphの `<sub>`/`<super>` タグを使え、と指示する。 | `SKILL.md:169-187` | 短い追加指示で代替可能と考えられる (推論による仮説 / 確信度: 中) |
-| F4 フォーム入力の分岐と強制手順 | 「必ず順番に、コードを書く前に」と強制し（forms.md:1）、まずフィールド有無を判定して「Fillable / Non-fillable」に分岐（forms.md:3-4）。非フィールド側はさらに構造抽出（A）／画像目視（B）／併用（Hybrid）に分岐し、bbox検査→入力→画像化して目視確認、を指示（forms.md:78-294）。ラベルのグループ化・入力欄の位置決め・画像上のフィールドの意味解釈はモデルの判断に委ねられている（forms.md:55, forms.md:100-132, forms.md:180-222）。 | `forms.md:1-4`, `forms.md:78-132`, `forms.md:172-294` | 独自の知識・手順・実装が価値を持つ (推論による仮説 / 確信度: 中) |
-| F5 AcroFormフィールドの列挙と値検証付き入力 | pypdfでフィールドを列挙し、型（text/checkbox/radio_group/choice）、ページ、Rect、チェックボックスのon/off値、ラジオの選択肢値、選択肢一覧をJSON化（scripts/extract_form_field_info.py:19-115）。入力時は field_id・ページ・チェックボックス/ラジオ/選択肢の値を検証し、誤りがあれば終了（scripts/fill_fillable_fields.py:25-43, scripts/fill_fillable_fields.py:55-71）、その後 NeedAppearances を立てて書き出す（scripts/fill_fillable_fields.py:45-52）。選択肢の /Opt 形式に対する pypdf の挙動をモンキーパッチで補正（scripts/fill_fillable_fields.py:74-87）。判定用 scripts/check_fillable_fields.py:7-11 は get_fields() の有無を表示するだけ。制約: /Kids を持つ非ボタンのフィールド（複数ウィジェットのテキスト欄など）は列挙から黙って除外される（scripts/extract_form_field_info.py:53-57）。テキスト欄の値は検証されない。警告メッセージに `${field_id}` というJS風の書式ミスがある（scripts/extract_form_field_info.py:32）。 | `scripts/extract_form_field_info.py:9-122`, `scripts/fill_fillable_fields.py:11-98`, `scripts/check_fillable_fields.py:1-11`, `forms.md:6-76` | 独自の知識・手順・実装が価値を持つ (実装確認済み / 確信度: 高) |
-| F6 非フィールドPDFへの注釈による書き込み（構造抽出・bbox検査・座標変換） | pdfplumberで単語座標、ページ幅の50%超の水平線、5〜15ptのほぼ正方形の矩形（チェックボックス候補）、罫線間の行境界を抽出（scripts/extract_form_structure.py:20-88）。fields.json のラベル/入力bboxの重なりと、入力欄の高さ<フォントサイズを検出（scripts/check_bounding_boxes.py:15-56）。pdf_width があればPDF上端原点座標、image_width なら画像座標とみなして pypdf の下端原点座標に変換し、FreeText注釈として書き込む（scripts/fill_pdf_form_with_annotations.py:10-90）。ページ画像化は200dpiでレンダリング後、最大1000pxに縮小（scripts/convert_pdf_to_images.py:9-24）。制約（実装確認）: 座標変換は mediabox の高さのみを使い、mediabox の原点オフセットやページ回転を考慮しない（scripts/fill_pdf_form_with_annotations.py:23-30, scripts/fill_pdf_form_with_annotations.py:43-46）。書き込みは平坦化されない注釈で、表示はビューア依存と考えられる（inference）。高さ検査は画像座標の場合ピクセルとptを比較することになる（scripts/check_bounding_boxes.py:43-49、影響は inference）。forms.md の画像座標の例は 1700x2200 だが、変換スクリプトは最大1000pxで出力する（forms.md:228-231 と scripts/convert_pdf_to_images.py:9-18）。 | `scripts/extract_form_structure.py:20-115`, `scripts/check_bounding_boxes.py:15-65`, `scripts/fill_pdf_form_with_annotations.py:10-107`, `scripts/convert_pdf_to_images.py:9-33` | 独自の知識・手順・実装が価値を持つ (実装確認済み / 確信度: 高) |
-| F7 スキャンPDFのOCR | pdf2imageで画像化し pytesseract.image_to_string でページごとのテキストを得る例のみ（SKILL.md:233-250, reference.md:589-601）。テキスト層を持つ検索可能PDFを作る手順はない。tesseract本体・popplerが必要なことは書かれていない（`pip install` のコメントのみ、SKILL.md:235）。 | `SKILL.md:233-250`, `reference.md:589-601` | モデル標準能力で代替可能と考えられる (推論による仮説 / 確信度: 中) |
-
-### 機能の詳細
-
-#### F1 一般的PDF操作のスニペット集（pypdf / pdfplumber / reportlab / CLI）
-- 分類: 知識
-- 外部能力: pypdf, pdfplumber, pandas, reportlab, poppler-utils, qpdf, pdftk（任意）
-- 期待される効果: 使うライブラリを毎回同じ選択に寄せ、APIの書き方の誤りを減らす。
-- 理由: 内容はいずれのライブラリでも公式ドキュメントの基本例に相当する一般知識で、固有情報や決定的なコードはない。現行の汎用モデルは指示なしでも同等のコードを書くと考えられる（実験なしのため inference）。ツール選択を固定する効果はありうる。
-
-#### F2 上級リファレンス（pypdfium2 / pdf-lib / pdfjs / qpdf・poppler上級 / トラブルシュート）
-- 分類: 知識
-- 外部能力: pypdfium2, pdf-lib（Node.js）, pdfjs-dist, qpdf, poppler-utils, numpy, pytesseract
-- 期待される効果: 上級操作の際の参照資料。
-- 理由: 一般知識の範囲で、不完全な例や疑わしいCLI記述を含む。本文から「必要なら見よ」と名前で参照されるだけで、読まれるかはモデル次第。
-
-#### F3 ReportLabの上付き/下付き文字の落とし穴
-- 分類: 知識, 指示
-- 外部能力: reportlab
-- 期待される効果: 化学式・数式を含むPDF生成時の文字化け（黒四角）を防ぐ。
-- 理由: 内容自体は1〜2行で伝えられるが、利用者が事前に知らなければ書けない具体的な失敗知識で、最小指示案には含まれない。小さいが実用的な固有の注意と考えられる（効果は未検証）。
-
-#### F4 フォーム入力の分岐と強制手順
-- 分類: 手順, 指示
-- 外部能力: ImageMagick（magick/convert）
-- 期待される効果: コードをいきなり書かずにフィールド情報を確認させ、座標系の取り違えや検証の省略を減らす。
-- 理由: 確認工程（bbox検査・出力の画像化による目視確認）の強制は、素のモデルが自発的には省きがちな工程と考えられる。ただし最初の判定コマンドは `python scripts/check_fillable_fields`（拡張子なし）で、実ファイル `scripts/check_fillable_fields.py` と一致せずそのままでは失敗する（forms.md:4）。モデルが自力で補正する可能性は高いが未確認。
-
-#### F5 AcroFormフィールドの列挙と値検証付き入力
-- 分類: ツール, アルゴリズム
-- 外部能力: pypdf
-- 期待される効果: 存在しないフィールドIDや不正なチェックボックス値（/On か /Yes か等）を投入して無言で失敗する事故を防ぎ、入力結果を再現的にする。
-- 理由: 検証ロジックと /Opt 補正はコードとして実在する（implementation_confirmed）。モデルもその場で同様のコードを書けるが、チェックボックス状態値の抽出や値検証まで毎回やるとは限らない（inference）。
-
-#### F6 非フィールドPDFへの注釈による書き込み（構造抽出・bbox検査・座標変換）
-- 分類: ツール, アルゴリズム
-- 外部能力: pdfplumber, pypdf, pdf2image + poppler
-- 期待される効果: 目視推定だけに頼らずPDF内の実座標を使い、座標系変換をコードで行うことで、文字の位置ずれ・重なりを減らす。
-- 理由: 座標系の取り違え（上端原点/下端原点、画像/PDF）はモデルが誤りやすい処理で、それを決定的なコードで吸収している（実装は確認済み、効果は未検証）。ただし入力欄の位置の決定自体はモデルの判断に残る。
-
-#### F7 スキャンPDFのOCR
-- 分類: 知識
-- 外部能力: pytesseract + tesseract, pdf2image + poppler
-- 期待される効果: スキャンPDFからテキストを取り出す。
-- 理由: 最も一般的なOCRの定型例で、固有の工夫はない。
-
-## Claims
-
-| READMEの主張 | 実装 | 効果 | 宣伝との整合 | 独自価値 | 確信度 |
-|---|---|---|---|---|---|
-| C1: “reading or extracting text/tables from PDFs, combining or merging ... filling PDF forms, encrypting/decrypting PDFs, extracting images” `SKILL.md:3` | 確認済み | 未検証 | 整合 | モデル標準能力で代替可能と考えられる<br>(推論による仮説) | 中 |
-| C2: “OCR on scanned PDFs to make them searchable” `SKILL.md:3` | 一部のみ | 未検証 | 誇張の疑い | モデル標準能力で代替可能と考えられる<br>(推論による仮説) | 中 |
-| C3: “This script will verify that the field IDs and values you provide are valid” `forms.md:76` | 確認済み | 未検証 | 整合 | 独自の知識・手順・実装が価値を持つ<br>(推論による仮説) | 高 |
-| C4: “First try to extract coordinates from the PDF structure (more accurate), then fall back to visual estimation” `forms.md:79` | 確認済み | 未検証 | 整合 | 独自の知識・手順・実装が価値を持つ<br>(推論による仮説) | 中 |
-| C5: “This checks for intersecting bounding boxes and entry boxes that are too small for the font size.” `forms.md:163-168` | 確認済み | 未検証 | 整合 | 独自の知識・手順・実装が価値を持つ<br>(推論による仮説) | 高 |
-| C6: “pdf-lib maintains form structure better than most alternatives” `reference.md:545` | 欠落 | 未検証 | 誇張の疑い | 現時点では判断不能<br>(未確認) | 中 |
-| C7: “the document creation & editing skills that power Claude's document capabilities under the hood ... actively used in a production AI application” `@repo/README.md:20` | 該当なし | 評価不能 | 評価不能 | 現時点では判断不能<br>(未確認) | 低 |
-
-**判定の集計**
+## 付録: 判定の集計
 
 | 観点 | 判定 | 件数 |
 |---|---|---|
-| 実装 | 確認済み | 4 |
-| 実装 | 一部のみ | 1 |
-| 実装 | 欠落 | 1 |
-| 実装 | 該当なし | 1 |
-| 効果 | 未検証 | 6 |
-| 効果 | 評価不能 | 1 |
-| 宣伝との整合 | 整合 | 4 |
-| 宣伝との整合 | 誇張の疑い | 2 |
-| 宣伝との整合 | 評価不能 | 1 |
-| 独自価値 | モデル標準能力で代替可能と考えられる | 2 |
-| 独自価値 | 独自の知識・手順・実装が価値を持つ | 3 |
-| 独自価値 | 現時点では判断不能 | 2 |
-| 確信度 | 高 | 2 |
-| 確信度 | 中 | 4 |
-| 確信度 | 低 | 1 |
-
-#### C1
-- 主張されている効果: 列挙されたPDF操作全般に対応する。
-- 仕組み: 本文のコード例と、フォーム入力用の手順・スクリプト。
-- 実装上の根拠: フォーム入力以外はコード例の提示のみで、実行可能なツールは同梱されていない。透かしは既存の透かしPDFを前提とする（SKILL.md:256-257）。列挙された操作それぞれに対応する例は存在する。 `SKILL.md:30-119`, `SKILL.md:121-187`, `SKILL.md:252-294`, `forms.md:1-294`
-- 実験上の根拠: 実験未実施
-- notes: 対応範囲の主張としては控えめで実装に見合う。ただしフォーム入力を除けば、スキルがあることでモデル標準以上にできるようになる根拠は示されていない。依存ライブラリ・CLIの導入前提は説明されていない。
-
-#### C2
-- 主張されている効果: スキャンPDFをOCRして検索可能にする。
-- 仕組み: pytesseract によるOCR例。
-- 実装上の根拠: 例はOCR結果を文字列として出力するだけで、テキスト層を埋め込んだ検索可能PDFを作る手順（例: hOCR/PDF出力や ocrmypdf）はない。 `SKILL.md:233-250`
-- 実験上の根拠: 実験未実施
-- notes: 「searchable」の部分に対応する実装・手順がない。モデルが自力で補う可能性はあるが、それはスキルの寄与ではない。
-
-#### C3
-- 主張されている効果: 入力前にフィールドIDと値の妥当性を検証する。
-- 仕組み: fill_fillable_fields.py が extract_form_field_info の結果と突き合わせる。
-- 実装上の根拠: field_id の存在、ページ番号、チェックボックス/ラジオ/選択肢の値を検証する。テキスト欄の値は検証対象外。/Kids を持つ非ボタンのフィールドは列挙されないため、正しいIDでも「invalid」と判定されうる（scripts/extract_form_field_info.py:53-57）。 `scripts/fill_fillable_fields.py:25-43`, `scripts/fill_fillable_fields.py:55-71`
-- 実験上の根拠: 実験未実施
-- notes: 機能の記述として実装どおり。
-
-#### C4
-- 主張されている効果: 構造抽出による座標は目視推定より正確。
-- 仕組み: pdfplumber による単語・罫線・矩形の座標抽出と、上端原点→下端原点の変換。
-- 実装上の根拠: 抽出と変換は実装されている。入力欄の位置はラベル座標からモデルが計算する（forms.md:122-132）。 `scripts/extract_form_structure.py:20-88`, `scripts/fill_pdf_form_with_annotations.py:23-30`, `forms.md:96-168`
-- 実験上の根拠: 実験未実施
-- notes: テキスト層のあるPDFでは実座標を使う方が精度が高いという主張は技術的に妥当と考えられるが、測定データはない。mediabox の原点オフセットや回転ページでは位置ずれしうる（scripts/fill_pdf_form_with_annotations.py:43-46）。
-
-#### C5
-- 主張されている効果: bboxの重なりと高さ不足を検出する。
-- 仕組み: check_bounding_boxes.py の総当たり交差判定と高さ比較。
-- 実装上の根拠: 記述どおり。同一ページ内のラベル/入力の全ペアを比較し、エラーは20件で打ち切る。 `scripts/check_bounding_boxes.py:20-52`
-- 実験上の根拠: 実験未実施
-- notes: 画像座標の場合、高さ（px）とフォントサイズ（pt）を直接比較している。
-
-#### C6
-- 主張されている効果: フォーム入力では pdf-lib の方が構造を保つ。
-- 仕組み: 説明なし
-- 実装上の根拠: スキルのフォーム手順はすべて pypdf で、pdf-lib によるフォーム入力の例・スクリプトはない。Quick Reference は「pdf-lib or pypdf (see FORMS.md)」としているが、FORMS.md に pdf-lib は登場しない。 `forms.md:74-75`, `SKILL.md:307`
-- 実験上の根拠: 実験未実施
-- notes: 比較の根拠がなく、スキル自身の推奨手順（pypdf）とも食い違うため、モデルの方針を揺らす可能性がある（inference）。
-
-#### C7
-- 主張されている効果: 本番のClaudeの文書機能で使われている実績のあるスキルである。
-- 仕組み: 説明なし
-- 実装上の根拠: リポジトリ内で検証できる事柄ではない。同READMEは「Claudeで得られる実装・挙動はここに示すものと異なりうる」と免責している（@repo/README.md:24）。
-- 実験上の根拠: 実験未実施
-- notes: 作者・採用実績は品質の根拠に数えない。本番利用されていても、この版と本番版の同一性も、効果も確認できない。
-
-## Necessity
-
-**素のモデルでできそうな部分**
-
-- pypdf/pdfplumber/reportlab/qpdf/pdftotext による結合・分割・回転・抽出・作成・暗号化の基本例（SKILL.md:13-167, SKILL.md:189-294）
-- reference.md の上級ライブラリ例の大半（reference.md:5-601）
-- pytesseract によるOCRの定型例（SKILL.md:233-250）
-
-**数行の指示で代替できそうな部分**
-
-- ツール選択の方針（表は pdfplumber、作成は reportlab 等。SKILL.md:296-307）
-- ReportLabでUnicode上付き/下付き文字を使わず <sub>/<super> を使う注意（SKILL.md:169-187）
-
-**スキル固有の価値**
-
-- AcroFormフィールド列挙（チェックボックス状態値・ラジオ・選択肢を含む）と値検証付き入力（scripts/extract_form_field_info.py, scripts/fill_fillable_fields.py）
-- 非フィールドPDFの構造抽出・bbox検査・座標系変換込みの注釈書き込み（scripts/extract_form_structure.py, scripts/check_bounding_boxes.py, scripts/fill_pdf_form_with_annotations.py）
-- フォーム入力の分岐と検証工程（bbox検査・出力の画像化による目視確認）の強制（forms.md:1-294）
-
-**不要または冗長と思われる構成**
-
-- どこからも参照されない scripts/create_validation_image.py（エージェントが使う導線がない）
-- SKILL.md と reference.md の重複（結合・分割・OCR・暗号化の例が両方にある）
-- pdftk・pdfjs-dist（ブラウザ用）・pdf-lib の例は、Python中心のワークフローでは使われにくい
-
-**確証がない部分**
-
-- フォーム入力ワークフローの実際の入力精度向上
-- `qpdf --fix-qdf` や `pdftotext -bbox-layout`（最速との記述）の正しさ（reference.md:325, reference.md:536。監査者の知識では誤りの疑い、実行未確認）
-- 依存が欠けた環境での挙動
-
-### 最小指示案（B群）
-
-```text
-このPDFファイルについて作業してほしい。必要に応じてテキストや表の抽出、結合・分割・ページ回転、透かし追加、新規PDF作成、フォーム入力、暗号化/復号、画像抽出、スキャンPDFのOCRを行って、結果をファイルとして出力して。Pythonなど使えるツールは自由に使ってよい。
-```
-
-**最小指示で再現できないもの**
-
-- フォーム入力用の同梱スクリプト群（フィールド列挙・値検証・構造抽出・bbox検査・座標変換付き注釈書き込み）
-- フォーム入力時の分岐手順と、bbox検査・出力画像化による確認工程の強制
-- ReportLabでUnicode上付き/下付き文字が黒四角になるという具体的な落とし穴
-- ライブラリ・CLIの選択方針（表形式の対応表）
-
-## Experimental Results
-
-対照実験は未実施。実験で検証することが望ましい主張:
-
-- [C3, C4, C5] フォーム入力では C（スキル適用）が A（素）・B（最小指示）より、正しいフィールドへの入力率と位置精度が高い。 — AcroForm付きPDF（チェックボックス・ラジオ・選択肢含む）と、罫線だけの非フィールドPDFに、与えたプロフィールを入力させ、フィールド値と注釈位置を機械チェックする。
-- [C1] 結合・分割・表抽出などの一般操作では A/B/C の成功率に差がない。 — 3つのPDFの結合とページ抽出、表をCSVへ抽出、の3タスクで出力をページ数・セル一致で採点する。
-- [C2] 「検索可能にして」という依頼で、C はテキスト層付きPDFを B より高い率で作るとは限らない。 — 画像のみのスキャンPDFを検索可能にさせ、出力PDFから pdftotext で文字列が取れるかを判定する。
-
-## セキュリティ上の注意（副次的な記録）
-
-- `pip install pytesseract pdf2image` という依存インストールのコメント。強制ではなく例示。ネットワークアクセスやシェル実行を行うコードは同梱スクリプトにない（スクリプトはローカルファイルの読み書きのみ）。 `SKILL.md:235` — 監査中は実行もインストールもしなかった。
-- 実行時に pypdf の DictionaryObject.get_inherited をモンキーパッチする。影響はそのスクリプトのプロセス内に限られ、危険性は低い。 `scripts/fill_fillable_fields.py:74-87` — 読んで解析しただけで、実行していない。
-- 「CRITICAL: You MUST complete these steps in order」は利用時のエージェント向けの作業指示で、監査者・評価者への誘導ではない。注入候補として検出された行はない。 `forms.md:1` — 監査データとして扱い、従わなかった。
-
-## Conclusion
-
-**独自価値はあるが効果は未検証 / 簡単な指示で代替できる可能性が高い**
-
-- スキルの価値の中心はフォーム入力（forms.md と同梱スクリプト）。フィールド列挙・値検証・座標変換・bbox検査が決定的なコードとして実装されており、最小指示では再現できない独自価値がある。ただし効果は未検証（unique_value_unverified）。
-- SKILL.md本文と reference.md の大部分（全体の文量の大半）は一般的なライブラリのスニペット集で、現行の汎用モデルが標準で書ける内容と考えられる。フォーム以外の用途では、短い指示で代替できる可能性が高い（likely_replaceable_by_short_prompt、inference）。
-- description の「OCRで検索可能にする」は本文の実装を超えている（C2）。reference.md の pdf-lib 推奨はフォーム手順と食い違う（C6）。forms.md:4 の判定コマンドは拡張子 .py が抜けていて実ファイルと一致しない。本文の REFERENCE.md/FORMS.md という大文字の参照名は実ファイル名と大文字小文字が違う。いずれも小さな保守上の不備。
-- 定量的な性能主張はなく、宣伝による誇張は全体としては小さい。リポジトリREADMEの本番利用の記述は検証不能で、評価の根拠に含めていない。
-
-### 監査の限界
-
-- 静的監査のみ。スクリプト・コマンドは実行しておらず、依存ライブラリのバージョン差（pypdf の API 変更など）による動作可否は未確認。
-- 対照実験は実施していない（ユーザーの指示）。効果に関する判断はすべて inference。
-- qpdf・pdftotext オプションの正誤は監査者の知識に基づく指摘で、実行による確認はしていない。
-- 対象は commit dbd4588f9e1033efb41dad4bef2f7947c8993d44 の skills/pdf。Claude.ai 等で本番提供されている版との同一性は確認できない。
+| 仕組み | 実装を確認できた | 3 |
+| 仕組み | 実装は一部だけ | 2 |
+| 仕組み | 実装で確かめる種類の主張ではない | 1 |
+| 効果 | 測定はない | 5 |
+| 効果 | 確かめようがない | 1 |
+| 宣伝の強さ | 実装と根拠に見合っている | 4 |
+| 宣伝の強さ | 実装と根拠に比べてやや強い | 1 |
+| 宣伝の強さ | 判断できない | 1 |
+| 代わりになるか | 素のモデルで足りそう | 2 |
+| 代わりになるか | スキル固有の価値あり | 2 |
+| 代わりになるか | 判断できない | 2 |
+| 確かさ | 中 | 4 |
+| 確かさ | 低 | 2 |

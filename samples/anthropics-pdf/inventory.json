@@ -1,4 +1,59 @@
 {
+  "context_cost": {
+    "external_text": {
+      "chars": 2212,
+      "est_tokens": 553,
+      "files": [
+        "@repo/.claude-plugin/marketplace.json"
+      ]
+    },
+    "frontmatter_description": {
+      "chars": 437,
+      "est_tokens": 110
+    },
+    "method": "chars/4 for ASCII-dominant text, chars/1.5 for CJK-dominant text (estimate only)",
+    "reachable_text": {
+      "chars": 49085,
+      "est_tokens": 12275,
+      "files": [
+        "LICENSE.txt",
+        "forms.md",
+        "reference.md",
+        "scripts/check_bounding_boxes.py",
+        "scripts/convert_pdf_to_images.py",
+        "scripts/extract_form_field_info.py",
+        "scripts/extract_form_structure.py",
+        "scripts/fill_fillable_fields.py",
+        "scripts/fill_pdf_form_with_annotations.py"
+      ]
+    },
+    "scripts": {
+      "chars": 19075,
+      "est_tokens": 4771,
+      "files": [
+        "scripts/check_bounding_boxes.py",
+        "scripts/convert_pdf_to_images.py",
+        "scripts/extract_form_field_info.py",
+        "scripts/extract_form_structure.py",
+        "scripts/fill_fillable_fields.py",
+        "scripts/fill_pdf_form_with_annotations.py"
+      ]
+    },
+    "skill_md": {
+      "chars": 8034,
+      "est_tokens": 2009
+    }
+  },
+  "external_files": [
+    {
+      "kind": "text",
+      "lines": 73,
+      "path": "@repo/.claude-plugin/marketplace.json",
+      "reason": "plugin_manifest",
+      "sha256": "9bafecba8a8fd0a4d73670cc442504fcb27394d3f8960a5171f570d443b81936",
+      "size": 2213
+    }
+  ],
   "external_indicators": [
     {
       "excerpt": "https://www.anthropic.com/legal/consumer-terms",
@@ -267,6 +322,8 @@
       "path": "reference.md"
     }
   ],
+  "external_references": [],
+  "external_truncated": false,
   "files": [
     {
       "executable": false,
@@ -389,7 +446,7 @@
       "size": 3235
     }
   ],
-  "fingerprint": "e32d8fa5f3788208a3396065683a9ae8a768d9ca6a60b9617419eaff9515f099",
+  "fingerprint": "9cc34570c3784f44c87f7cb6b88fb29b25f8d9fef8f8e5544f98c58704701d1a",
   "frontmatter": {
     "errors": [],
     "line_end": 5,
@@ -412,6 +469,15 @@
       "target": "scripts/check_fillable_fields"
     }
   ],
+  "missing_references_scope": "only references made from review_targets (SKILL.md, files reachable from it, files under scripts/ or bin/, executables, root README*); files inside any tests/, test/, fixtures/ or examples/ directory are excluded unless reachable from SKILL.md; slash-less backtick/bare_path targets are never reported as missing; targets outside the skill directory that exist in the source tree are resolved as scope 'external' (@repo/...) instead",
+  "plugin": {
+    "hooks": [],
+    "manifests": [
+      "@repo/.claude-plugin/marketplace.json"
+    ],
+    "mcp_servers": [],
+    "root": "."
+  },
   "references": [
     {
       "exists": true,
@@ -420,6 +486,7 @@
       "line": 4,
       "resolution": "path",
       "resolved": "LICENSE.txt",
+      "scope": "skill",
       "target": "LICENSE.txt"
     },
     {
@@ -429,6 +496,7 @@
       "line": 11,
       "resolution": "case_insensitive",
       "resolved": "forms.md",
+      "scope": "skill",
       "target": "FORMS.md"
     },
     {
@@ -438,6 +506,7 @@
       "line": 307,
       "resolution": "case_insensitive",
       "resolved": "forms.md",
+      "scope": "skill",
       "target": "FORMS.md"
     },
     {
@@ -447,6 +516,7 @@
       "line": 311,
       "resolution": "case_insensitive",
       "resolved": "reference.md",
+      "scope": "skill",
       "target": "REFERENCE.md"
     },
     {
@@ -456,6 +526,7 @@
       "line": 312,
       "resolution": "case_insensitive",
       "resolved": "reference.md",
+      "scope": "skill",
       "target": "REFERENCE.md"
     },
     {
@@ -465,6 +536,7 @@
       "line": 313,
       "resolution": "case_insensitive",
       "resolved": "forms.md",
+      "scope": "skill",
       "target": "FORMS.md"
     },
     {
@@ -474,6 +546,7 @@
       "line": 314,
       "resolution": "case_insensitive",
       "resolved": "reference.md",
+      "scope": "skill",
       "target": "REFERENCE.md"
     },
     {
@@ -483,6 +556,7 @@
       "line": 4,
       "resolution": null,
       "resolved": "scripts/check_fillable_fields",
+      "scope": "skill",
       "target": "scripts/check_fillable_fields"
     },
     {
@@ -492,6 +566,7 @@
       "line": 8,
       "resolution": "path",
       "resolved": "scripts/extract_form_field_info.py",
+      "scope": "skill",
       "target": "scripts/extract_form_field_info.py"
     },
     {
@@ -501,6 +576,7 @@
       "line": 54,
       "resolution": "path",
       "resolved": "scripts/convert_pdf_to_images.py",
+      "scope": "skill",
       "target": "scripts/convert_pdf_to_images.py"
     },
     {
@@ -510,6 +586,7 @@
       "line": 56,
       "resolution": null,
       "resolved": "field_values.json",
+      "scope": "skill",
       "target": "field_values.json"
     },
     {
@@ -519,6 +596,7 @@
       "line": 60,
       "resolution": "basename",
       "resolved": "scripts/extract_form_field_info.py",
+      "scope": "skill",
       "target": "extract_form_field_info.py"
     },
     {
@@ -528,6 +606,7 @@
       "line": 74,
       "resolution": "basename",
       "resolved": "scripts/fill_fillable_fields.py",
+      "scope": "skill",
       "target": "fill_fillable_fields.py"
     },
     {
@@ -537,6 +616,7 @@
       "line": 75,
       "resolution": "path",
       "resolved": "scripts/fill_fillable_fields.py",
+      "scope": "skill",
       "target": "scripts/fill_fillable_fields.py"
     },
     {
@@ -546,6 +626,7 @@
       "line": 84,
       "resolution": "path",
       "resolved": "scripts/extract_form_structure.py",
+      "scope": "skill",
       "target": "scripts/extract_form_structure.py"
     },
     {
@@ -555,6 +636,7 @@
       "line": 92,
       "resolution": null,
       "resolved": "form_structure.json",
+      "scope": "skill",
       "target": "form_structure.json"
     },
     {
@@ -564,6 +646,7 @@
       "line": 98,
       "resolution": "basename",
       "resolved": "scripts/extract_form_structure.py",
+      "scope": "skill",
       "target": "extract_form_structure.py"
     },
     {
@@ -573,6 +656,7 @@
       "line": 166,
       "resolution": "path",
       "resolved": "scripts/check_bounding_boxes.py",
+      "scope": "skill",
       "target": "scripts/check_bounding_boxes.py"
     },
     {
@@ -582,6 +666,7 @@
       "line": 178,
       "resolution": "path",
       "resolved": "scripts/convert_pdf_to_images.py",
+      "scope": "skill",
       "target": "scripts/convert_pdf_to_images.py"
     },
     {
@@ -591,6 +676,7 @@
       "line": 250,
       "resolution": "path",
       "resolved": "scripts/check_bounding_boxes.py",
+      "scope": "skill",
       "target": "scripts/check_bounding_boxes.py"
     },
     {
@@ -600,6 +686,7 @@
       "line": 273,
       "resolution": "path",
       "resolved": "scripts/check_bounding_boxes.py",
+      "scope": "skill",
       "target": "scripts/check_bounding_boxes.py"
     },
     {
@@ -609,6 +696,7 @@
       "line": 284,
       "resolution": "path",
       "resolved": "scripts/fill_pdf_form_with_annotations.py",
+      "scope": "skill",
       "target": "scripts/fill_pdf_form_with_annotations.py"
     },
     {
@@ -618,6 +706,7 @@
       "line": 289,
       "resolution": "path",
       "resolved": "scripts/convert_pdf_to_images.py",
+      "scope": "skill",
       "target": "scripts/convert_pdf_to_images.py"
     },
     {
@@ -627,6 +716,7 @@
       "line": 60,
       "resolution": "path",
       "resolved": "scripts/check_bounding_boxes.py",
+      "scope": "skill",
       "target": "check_bounding_boxes.py"
     },
     {
@@ -636,6 +726,7 @@
       "line": 29,
       "resolution": "path",
       "resolved": "scripts/convert_pdf_to_images.py",
+      "scope": "skill",
       "target": "convert_pdf_to_images.py"
     },
     {
@@ -645,6 +736,7 @@
       "line": 31,
       "resolution": "path",
       "resolved": "scripts/create_validation_image.py",
+      "scope": "skill",
       "target": "create_validation_image.py"
     },
     {
@@ -654,6 +746,7 @@
       "line": 120,
       "resolution": "path",
       "resolved": "scripts/extract_form_field_info.py",
+      "scope": "skill",
       "target": "extract_form_field_info.py"
     },
     {
@@ -663,6 +756,7 @@
       "line": 12,
       "resolution": "path",
       "resolved": "scripts/extract_form_structure.py",
+      "scope": "skill",
       "target": "extract_form_structure.py"
     },
     {
@@ -672,6 +766,7 @@
       "line": 93,
       "resolution": "path",
       "resolved": "scripts/extract_form_structure.py",
+      "scope": "skill",
       "target": "extract_form_structure.py"
     },
     {
@@ -681,6 +776,7 @@
       "line": 92,
       "resolution": "path",
       "resolved": "scripts/fill_fillable_fields.py",
+      "scope": "skill",
       "target": "fill_fillable_fields.py"
     },
     {
@@ -690,8 +786,24 @@
       "line": 101,
       "resolution": "path",
       "resolved": "scripts/fill_pdf_form_with_annotations.py",
+      "scope": "skill",
       "target": "fill_pdf_form_with_annotations.py"
     }
+  ],
+  "review_targets": [
+    "LICENSE.txt",
+    "SKILL.md",
+    "forms.md",
+    "reference.md",
+    "scripts/check_bounding_boxes.py",
+    "scripts/check_fillable_fields.py",
+    "scripts/convert_pdf_to_images.py",
+    "scripts/create_validation_image.py",
+    "scripts/extract_form_field_info.py",
+    "scripts/extract_form_structure.py",
+    "scripts/fill_fillable_fields.py",
+    "scripts/fill_pdf_form_with_annotations.py",
+    "@repo/.claude-plugin/marketplace.json"
   ],
   "schema": "slop-skill-auditor/inventory@1",
   "skill_md": {
@@ -1018,6 +1130,12 @@
       "ok": true
     },
     {
+      "detail": "trigger phrase 'Use this skill whenever'",
+      "id": "description_has_trigger_context",
+      "level": "info",
+      "ok": true
+    },
+    {
       "detail": "309 body lines (recommended max 500)",
       "id": "body_length",
       "level": "warn",
@@ -1030,6 +1148,10 @@
       "ok": true
     }
   ],
+  "truncated_lines": {
+    "files": [],
+    "max_chars": 4000
+  },
   "unreferenced_files": [
     "scripts/check_fillable_fields.py",
     "scripts/create_validation_image.py"

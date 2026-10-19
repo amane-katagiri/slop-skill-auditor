@@ -38,7 +38,7 @@ def agent_settings(wd: Path) -> dict:
     }
 
 
-def agent_audit(target, work, model="sonnet", note="", copy_ignore=None, budget_usd=5, timeout=1800):
+def agent_audit(target, work, model="sonnet", note="", budget_usd=5, timeout=1800, prefetch=False):
     work = Path(work)
     if work.exists():
         shutil.rmtree(work)
@@ -46,7 +46,7 @@ def agent_audit(target, work, model="sonnet", note="", copy_ignore=None, budget_
     wd = make_workdir("slop-agent-audit-")
     try:
         shutil.copytree(SKILL_ROOT, wd / SKILL_REL, ignore=SKILL_COPY_IGNORE)
-        if "://" in str(target):
+        if prefetch or "://" in str(target):
             fetch = subprocess.run([sys.executable, "-I", str(SKILL_ROOT / "scripts" / "fetch_target.py"), str(target), "--out", str(wd / "audit")],
                                    env=child_env(), capture_output=True, text=True, timeout=600)
             if fetch.returncode != 0:
@@ -54,7 +54,7 @@ def agent_audit(target, work, model="sonnet", note="", copy_ignore=None, budget_
             target_arg = f"{target}（取得済み: audit_dir ./audit に provenance.json と source/ がある。fetch_target.py は再実行しないで）"
         else:
             src = Path(target).resolve()
-            shutil.copytree(src, wd / "target" / src.name, ignore=copy_ignore, symlinks=True)
+            shutil.copytree(src, wd / "target" / src.name, symlinks=True)
             target_arg = f"./target/{src.name}"
         prompt = f"/slop-skill-auditor {target_arg} のスキルを監査して。audit_dir は ./audit にして、report.md まで作って。対照実験はしないで。{note}"
         cmd = [
@@ -88,8 +88,9 @@ def main():
     p.add_argument("--model", default="sonnet")
     p.add_argument("--note", default="")
     p.add_argument("--budget-usd", type=float, default=5)
+    p.add_argument("--prefetch", action="store_true", help="fetch a local target with fetch_target.py (keeps its repo README/docs) instead of copying only the directory")
     args = p.parse_args()
-    work, commands, result = agent_audit(args.target, args.work, args.model, args.note, budget_usd=args.budget_usd)
+    work, commands, result = agent_audit(args.target, args.work, args.model, args.note, budget_usd=args.budget_usd, prefetch=args.prefetch)
     print(json.dumps({
         "work": str(work),
         "subtype": result.get("subtype"),

@@ -523,6 +523,11 @@ def decide_mode(plan: dict, exp_dir: Path, allow_unsandboxed: bool, dry_run: boo
     mode = {"required": pol["required"], "reasons": pol["reasons"], "allow_unsandboxed": allow_unsandboxed, "bash_denied": False}
     if not pol["required"]:
         mode.update(name="permissions-only", sandbox=False)
+        if dry_run:
+            return mode
+        st = do_selftest(exp_dir, model="haiku")
+        if not (st.get("file_isolation_ok") and st.get("hooks_disabled")):
+            raise ExperimentError("permission-rule isolation selftest failed (file isolation or disabled hooks); refusing to run")
         return mode
     if dry_run:
         st_path = plan_paths(exp_dir)["selftest"]

@@ -25,10 +25,17 @@
   "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
   "dirty": null,
   "docs": [],
-  "fetched_at": "2026-10-17T19:05:01Z",
+  "external_files": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "reason": "plugin_manifest"
+    }
+  ],
+  "fetched_at": "2026-10-18T19:31:02Z",
   "input": "https://github.com/anthropics/skills/tree/main/skills/pdf",
   "kind": "github_tree",
   "notes": [],
+  "plugin_root": ".",
   "ref_requested": "main",
   "repo_url": "https://github.com/anthropics/skills.git",
   "schema": "slop-skill-auditor/provenance@1",

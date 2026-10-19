@@ -373,9 +373,19 @@ class RunTests(Base):
             self.assertIsNone(p["ci95"])
             self.assertIn("no scored trials", p["reason"])
 
+    def test_permissions_only_run_refuses_when_isolation_selftest_fails(self):
+        self.init_capability(n=1)
+        self.freeze()
+        os.environ["FAKE_NO_LOAD"] = "1"
+        code, _, err = call("run", self.exp)
+        self.assertEqual(code, 2)
+        self.assertIn("isolation selftest failed", err)
+        self.assertFalse(list((self.exp / "trials").glob("*/result.json")) if (self.exp / "trials").exists() else [])
+
     def test_c_not_loaded_is_excluded(self):
         self.init_capability(n=1)
         self.freeze()
+        self.assertEqual(call("selftest", self.exp)[0], 0)
         os.environ["FAKE_NO_LOAD"] = "1"
         self.run_all()
         call("blind", self.exp)
