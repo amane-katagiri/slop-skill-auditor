@@ -173,3 +173,7 @@ tests/                       テスト（説明は tests/README.md）
 samples/                     監査レポートの例
 docs/experiments/            過去の実験記録
 ```
+
+## ライセンス
+
+MIT License。[LICENSE](LICENSE) を参照してください。

@@ -1,6 +1,7 @@
 ---
 name: slop-skill-auditor
 description: Audit another Agent Skill (SKILL.md format, for Claude Code / Codex etc.) to find out what it actually does, whether it adds value over a plain agent or a few-line prompt, and whether its README/marketing claims match the implementation. Optionally runs controlled A/B/C experiments (baseline vs minimal prompt vs full skill). Use when the user asks to audit, evaluate or sanity-check a skill's value or claims (not for ordinary code review of a skill's source), asks "is this skill worth installing / just slop / overhyped", or gives a skill directory, SKILL.md path or GitHub URL and asks what it really does. スキルを監査して・このスキル意味ある？・READMEの宣伝は妥当？・3条件で比較して、などの依頼で使う。
+license: MIT
 ---
 
 # slop-skill-auditor
