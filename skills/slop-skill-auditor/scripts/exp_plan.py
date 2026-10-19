@@ -146,6 +146,7 @@ def plan_template(skill_dir: Path, name: str, exp_type: str = "capability", audi
             "name": "claude-code", "model": "sonnet", "effort": None, "tools": list(DEFAULT_TOOLS),
             "max_budget_usd_per_trial": 1.0, "timeout_s": 900, "mcp_config": None,
             "mcp_config_conditions": list(CONDITIONS) if exp_type == "capability" else ["C"],
+            "sandbox_unix_sockets": False, "sandbox_allow_all_bash": False,
         },
         "trials_per_condition": 3,
         "seed": secrets.randbelow(2**31),
@@ -306,6 +307,12 @@ def _validate_backend(backend: dict, conds: tuple[str, ...], r: _Report) -> None
         v = backend.get(key)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
             E(f"backend.{key} must be a positive number")
+    for key in ("sandbox_unix_sockets", "sandbox_allow_all_bash"):
+        if not isinstance(backend.get(key), bool):
+            E(f"backend.{key} must be true or false")
+    if backend.get("sandbox_unix_sockets") is True:
+        r.W("backend.sandbox_unix_sockets: trials may create and connect Unix sockets; /run, /var/run and /tmp are hidden "
+            "except the workdir and Claude's temp dir, and selftest checks that host sockets are unreachable")
     mcp = backend.get("mcp_config")
     if mcp is None:
         return

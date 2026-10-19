@@ -97,6 +97,10 @@ python3 -I <skill>/scripts/experiment.py aggregate <exp_dir>
 - 試行・selftest・審査員の起動にはすべて `disableAllHooks: true` を渡す。対象スキルのフロントマター `hooks:` やフィクスチャの `.claude/settings.json` のフックはサンドボックス外で動くため。`selftest` はフック付きのスキルとプロジェクト設定を置いて、フックが発火しないことも確かめる。フィクスチャと `files` 参照出力のディレクトリに `.claude/` や `CLAUDE.md` / `CLAUDE.local.md` があると `validate` が拒否し、起動直前にも作業ディレクトリを検査する（C群の `.claude/skills/<name>` だけはランナーが置く）。
 - 試行は実験ディレクトリ・監査ディレクトリ・スキルの原本・他の `slop-*` 一時ディレクトリ・`/mnt` を読めず、書けない（許可ルールの Read/Edit/Write の deny とサンドボックスの denyRead・denyWrite。サンドボックスは既定で Claude の一時ディレクトリへの書き込みを許すため）。`selftest` はそこに置いた目印を読めないこと、実験ディレクトリと一時ディレクトリの兄弟ディレクトリに Bash と Write ツールで書けないこと（`write_isolation_ok`）を確かめ、どちらのモードもこれを満たさないと `run` は拒否される。`selftest.json` は Claude Code のバージョン・設定の形・`TMPDIR`・プラットフォーム・bwrap/socat の有無が一致し、中身が整合するときだけ再利用される。プランのパス（`skill.dir`、`fixture_dir`、`files` の `dir`、`mcp_config`）は監査ディレクトリ（`<audit_dir>/experiments/<id>` の場合）か実験ディレクトリの中になければならず、`~` は使えない。`init --skill-dir` も同じ。
 - `claude` と審査員に渡す環境変数は許可リスト（PATH、HOME、ロケール、TMPDIR、プロキシ・証明書の設定など）だけ。`ANTHROPIC_API_KEY` などの認証用変数は `~/.claude/.credentials.json`（OAuth）が無いときだけ渡す。
+- 試行の Bash は呼び出しごとに別のサンドボックスで動き、呼び出しが終わると子プロセスも消える。また既定では Unix ソケットを作れない。常駐デーモンを持つCLI（ブラウザ操作など）を使うスキルは、そのままでは C 群でも動かない。`backend` の次の2つ（どちらも必須の真偽値、既定は `false`）で調整する。
+  - `sandbox_unix_sockets`: Unix ソケットを許可する。パスでは絞れないので、代わりに `/run`・`/var/run`・`/tmp` を読めなくし、作業ディレクトリと Claude の一時ディレクトリだけを読めるようにする。`selftest` は、作業ディレクトリでソケットを作れることと、隠した場所に立てたおとりソケットに繋がらないこと（ホスト側の accept で判定）を確かめる。
+  - `sandbox_allow_all_bash`: サンドボックス内の Bash をすべて許可する。`autoAllowBashIfSandboxed` だけでは複合コマンドが確認待ちになり、dontAsk で拒否されるため。サンドボックスの外で動くコマンドは引き続き禁止。
+  - デーモンを呼び出しをまたいで残すには、試行の外に仲介プロセスを置き、CLI の実行をソケット経由で渡すなどの用意が要る。仲介は試行と同等以上に隔離し（ネットワークなし、ホームと実験ディレクトリは見せない、書けるのは試行の作業ディレクトリだけ）、その構成を結果の限界に書く。
 - `backend.mcp_config` の MCP サーバーはサンドボックスの外で動くので、`run --allow-unsandboxed-mcp` を付けたときだけ実行し、結果の `isolation` に記録する。
 - `checks` / `metrics` / 参照出力の `command` を動かす bwrap は、`/usr`・`/etc` などのシステムディレクトリと PATH 上の `python3` のプレフィックスだけを読み取り専用で見せ、`/tmp`・`/run`・`/var`・`/mnt`・`/home`・`$HOME` は空の tmpfs、作業ディレクトリだけ書き込み可にする。ネットワークなし、`--new-session`、全 capability を落とす。
 

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -491,6 +492,75 @@ class SafetyTests(Base):
         with mock.patch.object(sandbox, "build_backend_command", lambda *a, **k: [x for x in original(*a, **k) if x != "--strict-mcp-config"]):
             with self.assertRaises(plans.ExperimentError):
                 sandbox.build_checked_argv(backend, settings)
+
+    def test_unix_sockets_hide_host_socket_dirs(self):
+        wd = Path("/tmp/slop-x")
+        plain = sandbox.build_settings(wd, True, deny_dirs=["/d"])["sandbox"]
+        self.assertNotIn("allowAllUnixSockets", plain["network"])
+        self.assertNotIn("allowRead", plain["filesystem"])
+        sb = sandbox.build_settings(wd, True, deny_dirs=["/d"], unix_sockets=True)["sandbox"]
+        self.assertTrue(sb["network"]["allowAllUnixSockets"])
+        self.assertEqual(sb["filesystem"]["denyRead"], ["~/", "/d", "/run", "/var/run", "/tmp"])
+        self.assertEqual(sb["filesystem"]["allowRead"], [str(wd), str(sandbox.sandbox_tmpdir())])
+        self.assertNotIn("sandbox", sandbox.build_settings(wd, False, unix_sockets=True))
+        with self.assertRaisesRegex(plans.ExperimentError, "re-open"):
+            sandbox.build_settings(wd, True, deny_dirs=[str(sandbox.sandbox_tmpdir() / "exp")], unix_sockets=True)
+
+    def test_canary_sockets_record_connections_and_clean_up(self):
+        with ex.CanarySockets("t" + os.urandom(4).hex()) as c:
+            self.assertTrue(c.paths)
+            with socket.socket(socket.AF_UNIX) as s:
+                s.connect(str(c.paths[0]))
+            for _ in range(50):
+                if c.accepted:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(c.accepted, [str(c.paths[0])])
+        self.assertFalse(any(p.exists() for p in c.paths))
+
+    def test_allow_all_bash_only_inside_sandbox(self):
+        wd = Path("/tmp/slop-x")
+        self.assertNotIn("Bash", sandbox.build_settings(wd, True)["permissions"]["allow"])
+        self.assertIn("Bash", sandbox.build_settings(wd, True, allow_bash=True)["permissions"]["allow"])
+        perm = sandbox.build_settings(wd, False, deny_bash=True, allow_bash=True)["permissions"]
+        self.assertNotIn("Bash", perm["allow"])
+        self.assertIn("Bash", perm["deny"])
+        p = self.init_capability(n=1)
+        self.assertIs(p["backend"]["sandbox_allow_all_bash"], False)
+        for bad in (1, None):
+            if bad is None:
+                del p["backend"]["sandbox_allow_all_bash"]
+            else:
+                p["backend"]["sandbox_allow_all_bash"] = bad
+            self.save(p)
+            code, _, err = call("validate", self.exp)
+            self.assertEqual(code, 1)
+            self.assertIn("sandbox_allow_all_bash must be true or false", err)
+
+    def test_unix_sockets_plan_option(self):
+        p = self.init_capability(n=1)
+        self.assertIs(p["backend"]["sandbox_unix_sockets"], False)
+        p["backend"]["sandbox_unix_sockets"] = "yes"
+        self.save(p)
+        code, _, err = call("validate", self.exp)
+        self.assertEqual(code, 1)
+        self.assertIn("sandbox_unix_sockets must be true or false", err)
+        p["backend"]["sandbox_unix_sockets"] = True
+        self.save(p)
+        code, _, err = call("validate", self.exp)
+        self.assertEqual(code, 0, err)
+        self.assertIn("host sockets are unreachable", err)
+
+    def test_unix_sockets_selftest_fails_closed_without_socket_probes(self):
+        p = self.init_capability(n=1)
+        p["backend"]["sandbox_unix_sockets"] = True
+        self.save(p)
+        st = ex.do_selftest(self.exp, force=True)
+        self.assertTrue(st["sandbox"]["unix_sockets"])
+        self.assertEqual(st["sandbox"]["steps"]["host_sockets"], "not_attempted")
+        self.assertFalse(st["sandbox_ok"])
+        self.assertFalse(st["permissions_only"]["unix_sockets"])
+        self.assertNotIn("host_sockets", st["permissions_only"]["steps"])
 
     def test_optional_criterion_na(self):
         p = self.init_capability(n=1)

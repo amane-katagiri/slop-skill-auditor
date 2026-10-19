@@ -28,6 +28,7 @@ TOOLS_MOUNT_NAME = ".slop-tools"
 REQUIRED_LAUNCH_FLAGS = ("--strict-mcp-config", "--no-session-persistence")
 SYSTEM_RO_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc")
 TMPFS_DIRS = ("/tmp", "/run", "/var", "/mnt", "/home")
+UNIX_SOCKET_DENY_READ = ("/run", "/var/run", "/tmp")
 
 
 def oauth_credentials_present() -> bool:
@@ -201,7 +202,12 @@ def isolation_deny_dirs(exp_dir: Path, skill_dir: Path, workdir: Path) -> list[s
     return sorted(str(d) for d in dirs)
 
 
-def build_settings(workdir: Path, sandbox: bool, deny_bash: bool = False, deny_dirs=()) -> dict:
+def sandbox_tmpdir() -> Path:
+    return Path(os.environ.get("TMPDIR") or "/tmp") / f"claude-{os.getuid()}"
+
+
+def build_settings(workdir: Path, sandbox: bool, deny_bash: bool = False, deny_dirs=(), unix_sockets: bool = False,
+                   allow_bash: bool = False) -> dict:
     wd = str(workdir)
     # Claude Code permission paths need a leading '//' to be absolute; '/x' is relative to the settings root.
     settings = {
@@ -223,6 +229,18 @@ def build_settings(workdir: Path, sandbox: bool, deny_bash: bool = False, deny_d
             # The sandbox's default writable set includes Claude's temp dir, where experiments often live.
             "filesystem": {"denyRead": ["~/", *deny_dirs], "allowWrite": [wd], "denyWrite": list(deny_dirs)},
         }
+        if allow_bash:
+            # autoAllowBashIfSandboxed still leaves compound commands to a prompt, which dontAsk turns into a denial.
+            settings["permissions"]["allow"].append("Bash")
+        if unix_sockets:
+            # seccomp cannot filter sockets by path, so hide every directory where host sockets live instead.
+            tmp = sandbox_tmpdir()
+            reopened = [d for d in deny_dirs if inside(Path(d), tmp)]
+            if reopened:
+                raise ExperimentError(f"unix_sockets would re-open {reopened} through {tmp}; move them out of Claude's temp dir")
+            settings["sandbox"]["network"]["allowAllUnixSockets"] = True
+            settings["sandbox"]["filesystem"]["denyRead"] += list(UNIX_SOCKET_DENY_READ)
+            settings["sandbox"]["filesystem"]["allowRead"] = [wd, str(tmp)]
     return settings
 
 

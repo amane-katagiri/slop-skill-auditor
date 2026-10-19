@@ -14,6 +14,7 @@ e.g. a metric command: python3 -I "$SLOP_TOOLS/text_metrics.py" edit-ratio draft
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime as dt
 import json
@@ -24,9 +25,11 @@ import random
 import re
 import secrets
 import shutil
+import socket
 import statistics
 import subprocess
 import sys
+import threading
 from collections import Counter
 from pathlib import Path
 
@@ -44,8 +47,8 @@ from exp_plan import (  # noqa: E402
 )
 from exp_render import render_activation_md, render_md  # noqa: E402
 from exp_sandbox import (  # noqa: E402
-    FileSizeLimitExceeded, bwrap_status, build_checked_argv, build_settings, claude_version, isolation_deny_dirs, make_workdir,
-    resolve_backend_argv, run_process, safe_rmtree, sandbox_run, stdin_payload, workdir_base,
+    FileSizeLimitExceeded, bwrap_status, build_checked_argv, build_settings, claude_version,
+    isolation_deny_dirs, make_workdir, resolve_backend_argv, run_process, safe_rmtree, sandbox_run, stdin_payload, workdir_base,
 )
 from exp_stats import (  # noqa: E402
     BOOTSTRAP_RESAMPLES, MIN_N, PARETO_DEFINITIONS, UNSTABLE_MARGIN, UNSTABLE_MIN_N, band_label, bootstrap_diff_ci,
@@ -167,6 +170,17 @@ SELFTEST_PROMPT = """This is an automated isolation self-test. Perform each step
 13. Write tool: create {write_tool_experiment_dir} with content WPROBE
 14. Write tool: create {write_tool_temp_sibling} with content WPROBE
 Then reply DONE."""
+SELFTEST_UNIX_STEPS = """15. Bash tool: python3 -c "import socket; s=socket.socket(socket.AF_UNIX); s.bind('{wd}/probe.sock'); print('UNIX_BIND_OK')"
+16. Bash tool: python3 {wd}/check_socket_isolation.py
+    (The script tries to connect to canary sockets that this self-test itself opened outside the workdir, and sends nothing. Every connection is expected to fail; that failure is the passing result.)
+"""
+UNIX_PROBE_SCRIPT = """# Isolation check against the self-test's own canary sockets: each connect() must fail inside the sandbox.
+import socket
+for p in {paths!r}:
+    if socket.socket(socket.AF_UNIX).connect_ex(p) == 0:
+        print("HOST_SOCKET_CONNECTED", p)
+print("HOST_SOCKET_SCAN_DONE")
+"""
 HOOK_SKILL = "slop-hook-probe"
 HOOK_EVENTS_SKILL = ("PreToolUse", "PostToolUse", "Stop")
 HOOK_EVENTS_PROJECT = ("SessionStart", "UserPromptSubmit", "PreToolUse")
@@ -223,7 +237,47 @@ def write_isolation(steps: dict, sandbox: bool) -> bool:
     return all(v == "blocked" for k, v in steps.items() if sandbox or k.startswith("write_tool_"))
 
 
-def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, timeout: int = 300, keep: Path | None = None) -> dict:
+class CanarySockets:
+    """Listening sockets in the directories the sandbox must hide; any accepted connection means isolation failed."""
+
+    def __init__(self, tag: str):
+        dirs = [Path("/tmp"), Path(f"/run/user/{os.getuid()}")]
+        self.paths = [d / f".selftest-canary-{tag}.sock" for d in dirs if d.is_dir() and os.access(d, os.W_OK)]
+        self.accepted: list[str] = []
+        self.socks = []
+
+    def __enter__(self):
+        for p in self.paths:
+            s = socket.socket(socket.AF_UNIX)
+            s.bind(str(p))
+            s.listen()
+            self.socks.append(s)
+            threading.Thread(target=self._accept, args=(s, str(p)), daemon=True).start()
+        return self
+
+    def _accept(self, s, path):
+        try:
+            while True:
+                conn, _ = s.accept()
+                self.accepted.append(path)
+                conn.close()
+        except OSError:
+            pass
+
+    def __exit__(self, *exc):
+        for s in self.socks:
+            s.close()
+        for p in self.paths:
+            p.unlink(missing_ok=True)
+
+
+def selftest_prompt(unix_sockets: bool) -> str:
+    return SELFTEST_PROMPT.replace("Then reply DONE.", SELFTEST_UNIX_STEPS + "Then reply DONE.") if unix_sockets else SELFTEST_PROMPT
+
+
+def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, timeout: int = 300, keep: Path | None = None,
+                   unix_sockets: bool = False, allow_bash: bool = False) -> dict:
+    unix_sockets = unix_sockets and sandbox
     wd = make_workdir("slop-selftest-")
     sib = make_workdir("slop-selftest-sib-")
     token = "SLOPPROBE" + secrets.token_hex(8)
@@ -237,19 +291,26 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         "write_tool_experiment_dir": ("Write", exp_dir / f".slop-wprobe-tool-{tag}"),
         "write_tool_temp_sibling": ("Write", sib / f".slop-wprobe-tool-{tag}"),
     }
+    stack = contextlib.ExitStack()
     try:
         for f in (probe, exp_probe, skill_probe):
             f.write_text(token + "\n", encoding="utf-8")
         markers = install_hook_probes(wd)
-        settings = build_settings(wd, sandbox, deny_bash=not sandbox, deny_dirs=isolation_deny_dirs(exp_dir, skill_dir, wd))
+        if unix_sockets:
+            canaries = stack.enter_context(CanarySockets(tag))
+            (wd / "check_socket_isolation.py").write_text(UNIX_PROBE_SCRIPT.format(paths=[str(p) for p in canaries.paths]),
+                                                           encoding="utf-8")
+        settings = build_settings(wd, sandbox, deny_bash=not sandbox, deny_dirs=isolation_deny_dirs(exp_dir, skill_dir, wd),
+                                  unix_sockets=unix_sockets, allow_bash=allow_bash)
         probe_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Skill"]
         argv = build_checked_argv(
             {"model": model, "effort": None}, settings, allowed_tools=probe_tools, model=model,
             tools=probe_tools, budget=0.5,
         )
         transcript = wd.parent / (wd.name + ".jsonl")
-        prompt = f"/{HOOK_SKILL} " + SELFTEST_PROMPT.format(probe=probe, wd=wd, exp_probe=exp_probe, skill_probe=skill_probe, skill_dir=skill_dir,
-                                                                  **{k: m for k, (_, m) in write_markers.items()})
+        prompt = f"/{HOOK_SKILL} " + selftest_prompt(unix_sockets).format(
+            probe=probe, wd=wd, exp_probe=exp_probe, skill_probe=skill_probe, skill_dir=skill_dir,
+            **{k: m for k, (_, m) in write_markers.items()})
         code, _, err, timed_out = run_process(resolve_backend_argv(argv), stdin_payload(prompt), wd, timeout, stdout_path=transcript)
         parsed = parse_stream(transcript)
         raw = transcript.read_text(encoding="utf-8", errors="replace") if transcript.exists() else ""
@@ -259,7 +320,7 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         res = parsed["result"] or {}
         fired = sorted(m.name for m in markers if m.exists())
         out = {
-            "sandbox_settings": sandbox, "bash_denied_by_rule": not sandbox, "exit_code": code, "timed_out": timed_out,
+            "sandbox_settings": sandbox, "unix_sockets": unix_sockets, "bash_denied_by_rule": not sandbox, "exit_code": code, "timed_out": timed_out,
             "cost_usd": res.get("total_cost_usd"), "stderr_head": err.strip()[:500],
             "result_head": str(res.get("result") or "")[:300],
             "started": bool(parsed["tool_uses"]),
@@ -296,6 +357,14 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         steps["glob_tool_workdir"] = "ok" if glob and "write_ok.txt" in glob else "failed"
         wsteps = write_probe_steps(parsed, write_markers)
         steps |= wsteps
+        if unix_sockets:
+            bind = _step_result(parsed, "Bash", "probe.sock")
+            steps["unix_bind_workdir"] = "ok" if bind and "UNIX_BIND_OK" in bind else "failed"
+            scan = _step_result(parsed, "Bash", "check_socket_isolation.py")
+            out["canary_connections"] = sorted(set(canaries.accepted))
+            steps["host_sockets"] = ("allowed" if canaries.accepted or (scan and "HOST_SOCKET_CONNECTED" in scan)
+                                     else "not_attempted" if scan is None
+                                     else "blocked" if "HOST_SOCKET_SCAN_DONE" in scan and canaries.paths else "failed")
         out["steps"] = steps
         out["write_isolation_ok"] = write_isolation(wsteps, sandbox)
         out["token_leaked"] = leak
@@ -304,7 +373,8 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         if sandbox:
             out["ok"] = (not leak and out["hooks_disabled"] and out["write_isolation_ok"] and all(steps[k] == "blocked" for k in (*file_tools, "bash_read_home_file", "bash_network", "bash_list_home",
                                                                                           "bash_read_experiment_and_skill_source"))
-                         and all(steps[k] == "ok" for k in ("write_tool_workdir", "bash_write_workdir", "glob_tool_workdir")))
+                         and all(steps[k] == "ok" for k in ("write_tool_workdir", "bash_write_workdir", "glob_tool_workdir"))
+                         and (not unix_sockets or (steps["unix_bind_workdir"] == "ok" and steps["host_sockets"] == "blocked")))
         else:
             out["ok"] = (not leak and out["hooks_disabled"] and out["write_isolation_ok"] and all(steps[k] == "blocked" for k in file_tools)
                          and steps["write_tool_workdir"] == "ok" and steps["bash_write_workdir"] == "failed")
@@ -314,15 +384,17 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
             out["reason"] = "expected isolation not observed (see steps, hooks_fired, token_leaked, write_isolation_ok)"
         return out
     finally:
+        stack.close()
         for f in (probe, exp_probe, skill_probe, *(m for _, m in write_markers.values())):
             f.unlink(missing_ok=True)
         shutil.rmtree(wd, ignore_errors=True)
         shutil.rmtree(sib, ignore_errors=True)
 
 
-def selftest_environment(version: str | None) -> dict:
+def selftest_environment(version: str | None, unix_sockets: bool = False, allow_bash: bool = False) -> dict:
     canonical = Path("/slop-canonical/wd")
-    shapes = [build_settings(canonical, sb, deny_bash=not sb, deny_dirs=["/slop-canonical/deny"]) for sb in (True, False)]
+    shapes = [build_settings(canonical, sb, deny_bash=not sb, deny_dirs=["/slop-canonical/deny"], unix_sockets=unix_sockets,
+                             allow_bash=allow_bash) for sb in (True, False)]
     try:
         base = str(workdir_base())
     except ExperimentError as e:
@@ -331,7 +403,7 @@ def selftest_environment(version: str | None) -> dict:
         "claude_version": version, "platform": platform.platform(), "tmpdir": os.environ.get("TMPDIR"), "workdir_base": base,
         "bwrap": bool(shutil.which("bwrap")), "socat": bool(shutil.which("socat")),
         "settings_sha256": sha256_bytes(json.dumps(shapes, sort_keys=True).encode()),
-        "prompt_sha256": sha256_bytes(SELFTEST_PROMPT.encode()),
+        "prompt_sha256": sha256_bytes((selftest_prompt(unix_sockets) + (UNIX_PROBE_SCRIPT if unix_sockets else "")).encode()),
     }
     return env | {"key": sha256_bytes(json.dumps(env, sort_keys=True).encode())}
 
@@ -349,10 +421,20 @@ def selftest_cache_valid(cached, env: dict) -> bool:
             and cached["write_isolation_ok"] == (sb.get("write_isolation_ok") is True and perm.get("write_isolation_ok") is True))
 
 
+def unix_sockets(plan: dict) -> bool:
+    return plan["backend"]["sandbox_unix_sockets"]
+
+
+def allow_bash(plan: dict) -> bool:
+    return plan["backend"]["sandbox_allow_all_bash"]
+
+
 def do_selftest(exp_dir: Path, model: str = "haiku", force: bool = False) -> dict:
     path = plan_paths(exp_dir)["selftest"]
     version = claude_version()
-    env = selftest_environment(version)
+    plan = load_plan(exp_dir)
+    unix, bash = unix_sockets(plan), allow_bash(plan)
+    env = selftest_environment(version, unix, bash)
     if path.is_file() and not force:
         try:
             cached = load_json(path)
@@ -360,8 +442,9 @@ def do_selftest(exp_dir: Path, model: str = "haiku", force: bool = False) -> dic
             cached = None
         if selftest_cache_valid(cached, env):
             return cached
-    skill_dir = resolve_path(exp_dir, load_plan(exp_dir)["skill"]["dir"])
-    sb = selftest_probe(model, sandbox=True, exp_dir=exp_dir, skill_dir=skill_dir, keep=path.with_name("selftest_sandbox.jsonl"))
+    skill_dir = resolve_path(exp_dir, plan["skill"]["dir"])
+    sb = selftest_probe(model, sandbox=True, exp_dir=exp_dir, skill_dir=skill_dir, keep=path.with_name("selftest_sandbox.jsonl"),
+                        unix_sockets=unix, allow_bash=bash)
     perm = selftest_probe(model, sandbox=False, exp_dir=exp_dir, skill_dir=skill_dir, keep=path.with_name("selftest_permissions.jsonl"))
     data = {
         "schema": SELFTEST_SCHEMA, "ran_at": now_iso(), "claude_version": version, "model": model,
@@ -526,7 +609,8 @@ def execute_trial(exp_dir: Path, plan: dict, lock: dict, trial: dict, mode: dict
             abort(f"Claude Code config in workdir: {config[:5]}", f"workdir would load Claude Code config {config[:5]}")
         prompt = compose_prompt(plan, task, cond)
         deny = isolation_deny_dirs(exp_dir, skill_dir, wd)
-        settings = build_settings(wd, mode["sandbox"], deny_bash=mode["bash_denied"], deny_dirs=deny)
+        settings = build_settings(wd, mode["sandbox"], deny_bash=mode["bash_denied"], deny_dirs=deny, unix_sockets=unix_sockets(plan),
+                                  allow_bash=allow_bash(plan))
         mcp = mcp_for(plan, exp_dir, cond)
         argv = build_checked_argv(plan["backend"], settings, mcp)
         (tdir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -576,7 +660,8 @@ def execute_trial(exp_dir: Path, plan: dict, lock: dict, trial: dict, mode: dict
             "workspace_not_copied": workspace_skipped,
             "isolation": {"mode": mode["name"], "sandbox": mode["sandbox"], "allow_unsandboxed": mode["allow_unsandboxed"],
                           "bash_effectively_denied": mode["bash_denied"], "hooks_disabled": True,
-                          "mcp_unsandboxed": mcp is not None},
+                          "mcp_unsandboxed": mcp is not None, "unix_sockets": mode["sandbox"] and unix_sockets(plan),
+                          "all_bash_allowed": mode["sandbox"] and allow_bash(plan)},
             "error": error,
         }
         save_json(tdir / "result.json", result)
@@ -717,7 +802,8 @@ def cmd_run(exp_dir: Path, dry_run: bool, only: list[str] | None, allow_unsandbo
         print("# stdin is one stream-json user message wrapping the prompt below")
         for t in trials:
             wd = Path("/<workdir>")
-            argv = build_checked_argv(plan["backend"], build_settings(wd, mode["sandbox"], deny_bash=mode["bash_denied"]),
+            argv = build_checked_argv(plan["backend"], build_settings(wd, mode["sandbox"], deny_bash=mode["bash_denied"],
+                                                                      unix_sockets=unix_sockets(plan), allow_bash=allow_bash(plan)),
                                       mcp_for(plan, exp_dir, t["condition"]))
             print(f"\n## trial {t['trial_id']} order={t['order']} task={t['task_id']} condition={t['condition']}")
             print("workdir contents: fixture" + (f" + .claude/skills/{plan['skill']['name']}/" if t["condition"] == "C" else ""))
@@ -977,7 +1063,9 @@ def common_header(plan, lock, results, manifest, selftest, grading=None, judge_m
 def isolation_limitation(header) -> str:
     st = header["isolation"]["selftest"]
     return (f"Isolation: run modes {header['isolation']['run_modes']}; --allow-unsandboxed used: {header['isolation']['allow_unsandboxed_used']}; "
-            f"sandbox selftest ok: {st.get('sandbox_ok') if st else 'not run'}.")
+            f"sandbox selftest ok: {st.get('sandbox_ok') if st else 'not run'}; "
+            f"Unix sockets allowed in the sandbox: {header['backend']['sandbox_unix_sockets']}; "
+            f"all sandboxed Bash allowed: {header['backend']['sandbox_allow_all_bash']}.")
 
 
 def aggregate_activation(plan, lock, results, manifest, selftest) -> dict:
