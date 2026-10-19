@@ -564,3 +564,57 @@ class SafeNameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CloneLimitTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="clone-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        src = os.path.join(self.tmp, "src")
+        os.makedirs(os.path.join(src, "skill"))
+        Path(src, "skill", "SKILL.md").write_text("---\nname: s\ndescription: d\n---\nbody\n")
+        Path(src, "skill", "data.bin").write_bytes(b"x" * 4096)
+        git(src, "init", "-q")
+        git(src, "add", ".")
+        git(src, "commit", "-qm", "x")
+        self.bare = os.path.join(self.tmp, "bare.git")
+        git(self.tmp, "clone", "-q", "--bare", src, self.bare)
+
+    def fetch(self):
+        real_clone = fetch_target.clone
+        args = fetch_target.argparse.Namespace(input="https://github.com/o/r", out=os.path.join(self.tmp, "audit"),
+                                               skill=None, ref=None, doc=None, offline=False, force=False)
+        with mock.patch.object(fetch_target, "clone", lambda url, dest, ref, is_sha, deadline: real_clone("file://" + self.bare, dest, ref, is_sha, deadline)), \
+                mock.patch.object(fetch_target, "tool_versions", return_value={}):
+            return fetch_target.fetch(args)
+
+    def test_clone_within_cap(self):
+        prov, ambiguous = self.fetch()
+        self.assertFalse(ambiguous)
+        self.assertEqual(prov["skill_subpath"], "skill")
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "audit", "source", ".git")))
+
+    def test_clone_over_cap_is_deleted(self):
+        with mock.patch.object(fetch_target, "LOCAL_REPO_MAX_BYTES", 1024):
+            with self.assertRaisesRegex(FetchError, "exceeds"):
+                self.fetch()
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "audit", "source")))
+
+    def test_tree_exceeds_ignores_top_level_git(self):
+        root = os.path.join(self.tmp, "t")
+        os.makedirs(os.path.join(root, ".git"))
+        os.makedirs(os.path.join(root, "sub", ".git"))
+        with open(os.path.join(root, ".git", "pack"), "wb") as f:
+            f.truncate(10_000)
+        self.assertFalse(fetch_target.tree_exceeds(root, 5_000))
+        with open(os.path.join(root, "sub", ".git", "x"), "wb") as f:
+            f.truncate(10_000)
+        self.assertTrue(fetch_target.tree_exceeds(root, 5_000))
+
+    def test_git_network_deadline_kills_process(self):
+        with self.assertRaisesRegex(FetchError, "exceeded"):
+            fetch_target.run_git(["slp"], extra=("-c", "alias.slp=!sleep 30"), deadline=time.monotonic() - 1)
+        t0 = time.monotonic()
+        with self.assertRaisesRegex(FetchError, "exceeded the"):
+            fetch_target.run_git(["slp"], extra=("-c", "alias.slp=!sleep 30"), deadline=time.monotonic() + 0.3)
+        self.assertLess(time.monotonic() - t0, 5)

@@ -41,6 +41,8 @@ INDICATOR_RES = [
         r"\bcargo\s+install\b|\bgo\s+install\b|\bgem\s+install\b|\bnpx\s+-y\b|\bpipx\s+install\b")),
 ]
 SHELL_LANGS = {"bash", "sh", "shell", "console", "zsh", "shell-session", "terminal"}
+JA_IMPERATIVE = (r"(?:無視(?:しろ|せよ|して(?:ください|下さい))|従え|従って(?:ください|下さい)|従うこと|(?:高く|最高|満点で)評価(?:しろ|せよ|して|すること)"
+                 r"|高評価(?:を(?:つけ|付け)|に)|評価して(?:ください|下さい)|実行(?:しろ|せよ|して(?:ください|下さい))|満点を?(?:つけ|付け))")
 INJECTION_RES = [
     ("ignore_instructions", re.compile(
         r"\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:your\s+|the\s+|my\s+)?"
@@ -54,6 +56,11 @@ INJECTION_RES = [
     ("system_prompt", re.compile(r"\bsystem\s+prompt\b", re.I)),
     ("hide_from_user", re.compile(r"\bdo\s+not\s+(?:tell|inform|mention\s+(?:this\s+)?to|reveal\s+(?:this\s+)?to|alert)\s+(?:the\s+)?user", re.I)),
     ("rate_this_skill", re.compile(r"\b(?:rate|score|mark|classify|grade)\s+(?:this|the)\s+skill\s+(?:as|with|at)\b", re.I)),
+    ("ignore_instructions_ja", re.compile(
+        r"(?:以前|前|上記|これまで|今まで|先|既存|元|システム|他)の(?:すべての|全ての|全)?(?:指示|命令|ルール|指令|プロンプト)(?:を|は)?(?:すべて|全て)?(?:無視|忘れ|破棄)")),
+    ("addresses_auditor_ja", re.compile(
+        r"(?:(?:監査|評価|審査|採点)(?:者|人|員|担当)|レビュ(?:ア|アー|ワー|ーア|ーアー))[^。\n]{0,100}?" + JA_IMPERATIVE
+        + r"|(?<![A-Za-z])(?:AI|ＡＩ|LLM)(?:の(?:皆さん|皆様|方)|さん|様)?(?:へ|に告ぐ|向け)[^。\n]{0,100}?" + JA_IMPERATIVE)),
 ]
 AI_ADDRESS_RE = re.compile(r"\b(?:ai|assistant|agent|llm|model|claude|gpt|auditor|reviewer|evaluator)s?\b", re.I)
 IMPERATIVE_RE = re.compile(r"\b(?:ignore|must|should|do not|don't|run|execute|rate|score|say|tell|pretend|always|never|verify)\b", re.I)
@@ -449,6 +456,15 @@ def summary(inv):
     return "\n".join(out)
 
 
+def audit_inventory(audit_dir):
+    prov = load_json(os.path.join(audit_dir, "provenance.json"))
+    label = skill_label(prov)
+    skill_root = os.path.join(audit_dir, label)
+    if not os.path.isdir(skill_root):
+        raise ValueError("skill root missing: %s" % skill_root)
+    return build_inventory(skill_root, label, prov.get("skill_dir_name"), prov, audit_dir)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Deterministic inventory of a skill (reads files only, never executes them).")
     ap.add_argument("audit_dir", nargs="?", help="audit directory containing provenance.json")
@@ -464,12 +480,7 @@ def main(argv=None):
             inv = build_inventory(args.skill_dir, os.path.abspath(args.skill_dir))
         else:
             audit_dir = os.path.abspath(args.audit_dir)
-            prov = load_json(os.path.join(audit_dir, "provenance.json"))
-            label = skill_label(prov)
-            skill_root = os.path.join(audit_dir, label)
-            if not os.path.isdir(skill_root):
-                raise ValueError("skill root missing: %s" % skill_root)
-            inv = build_inventory(skill_root, label, prov.get("skill_dir_name"), prov, audit_dir)
+            inv = audit_inventory(audit_dir)
             write_json(os.path.join(audit_dir, "inventory.json"), inv)
     except (OSError, ValueError) as e:
         print("inventory: error: %s" % e, file=sys.stderr)

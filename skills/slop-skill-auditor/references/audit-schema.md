@@ -117,11 +117,12 @@ report.md の読み手は「このスキルを入れるか」を決める人。`
 ## check が強制するルール
 
 - 全 loc が実在し行範囲内であること。
+- `inventory.json` の `fingerprint` が `source/` から計算し直した値と一致すること（不一致なら `inventory.py` を再実行する）。
 - feature は `basis: unconfirmed` でない限り loc が1つ以上必要。
 - `assessment.implementation` が `confirmed` / `partial` / `missing` / `contradicted` の claim は `implementation_evidence` が必要（`missing` は欠落部分を参照している行）。
 - `effect: experimentally_supported` は、`experiments.runs` にある `experiment_ref`（results_file が実在）か、公開データの位置 `experimental_evidence_locations` が必要。`not_supported_in_experiment` は `experiment_ref` が必要。
-- `basis` / `unique_value_basis` の `experiment_observed` は、実在する results_file のある実験が必要。
+- `basis` / `unique_value_basis` の `experiment_observed` は、実在する results_file のある実験が必要。results_file は `experiment.py aggregate` が書く JSON（schema `slop-skill-auditor/experiment-results@1`）でなければならず、`experimentally_supported` の根拠にするならセルか比較を1つ以上含むこと。
 - `minimal_prompt.derived_from` は1つ以上必要で、README・`@docs/`・SKILL.md の frontmatter の行だけを指せる（スキル本文から最小指示を作ってはいけない）。
 - `experiments.status: "not_run"` なのに `runs` や `experiment_ref` があればエラー。
 - 警告: `inventory.json` の `review_targets`（SKILL.md、そこから辿れるファイル、スクリプト、README、スキル外の `@repo/…` ファイル）のうち、どの根拠にも引用されず `not_reviewed` にもないもの。「評価して問題なし」と「評価していない」を区別するため、読まなかったファイルは理由つきで `not_reviewed` に書く。
-- 警告: 推論だけで「代替可能」を確信度 high にしている、実装が確認済みなのに整合を `inconsistent` にしている、注入候補行があるのに `security_notes` が空、欠落参照がどこにも言及されていない、最小指示が長すぎる、`dropped` が空。
+- 警告: 推論だけで「代替可能」を確信度 high にしている、実装が確認済みなのに整合を `inconsistent` にしている、注入候補行があるのに `security_notes` が空、欠落参照がどこにも言及されていない、最小指示が長すぎる、`dropped` が空、最小指示が SKILL.md 本文と40文字以上同じ文字列を含む、`experimental_evidence_locations` が README や SKILL.md の行を指している（公開データはデータや結果のファイルを指す）。

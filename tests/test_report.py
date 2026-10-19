@@ -71,6 +71,8 @@ VALID = {
     "limitations": [],
 }
 
+RESULTS_JSON = json.dumps({"schema": "slop-skill-auditor/experiment-results@1", "cells": {"t1/A": {}}, "pairwise": []})
+
 
 class ReportTest(unittest.TestCase):
     @classmethod
@@ -183,7 +185,7 @@ class ReportTest(unittest.TestCase):
         d = copy.deepcopy(VALID)
         exp = self.audit / "experiments" / "e1"
         exp.mkdir(parents=True)
-        (exp / "results.json").write_text("{}")
+        (exp / "results.json").write_text(RESULTS_JSON)
         (exp / "results.md").write_text("| cond | score |\n|---|---|\n| A | 1 |\n")
         d["experiments"] = {"status": "run", "runs": [{"id": "e1", "results_file": "experiments/e1/results.json", "summary": "s"}], "recommended": []}
         d["claims"][0]["assessment"]["effect"] = "experimentally_supported"
@@ -233,6 +235,46 @@ class ReportTest(unittest.TestCase):
         d["claims"][0].update({"experiment_ref": "e1", "unique_value_basis": "experiment_observed"})
         return d
 
+    def warnings(self, data):
+        self.write(data)
+        return report.check(self.audit).warnings
+
+    def test_results_file_must_be_experiment_results(self):
+        exp = self.audit / "experiments" / "e1"
+        exp.mkdir(parents=True)
+        for content in ("{}", "not json", json.dumps({"schema": "other@1", "cells": {"a": 1}})):
+            (exp / "results.json").write_text(content)
+            errs = self.errors(self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json"))
+            self.assertTrue(any("is not JSON with schema" in e for e in errs), (content, errs))
+        (exp / "results.json").write_text(json.dumps({"schema": "slop-skill-auditor/experiment-results@1", "cells": {}, "pairwise": []}))
+        errs = self.errors(self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json"))
+        self.assertEqual([e for e in errs if "no cells or comparisons" in e], ["claims[C1]: effect 'experimentally_supported' but the results of 'e1' contain no cells or comparisons"])
+        (exp / "results.json").write_text(json.dumps({"schema": "slop-skill-auditor/experiment-results@1", "per_task": [{"task_id": "t"}]}))
+        self.assertEqual(self.errors(self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")), [])
+
+    def test_inventory_must_match_source(self):
+        self.assertEqual(self.errors(VALID), [])
+        with open(self.audit / "source" / "SKILL.md", "a") as fh:
+            fh.write("extra line\n")
+        self.assertIn("inventory.json: inventory.json does not match source/; rerun inventory.py", self.errors(VALID))
+
+    def test_minimal_prompt_copied_from_skill_body_warns(self):
+        self.assertFalse([w for w in self.warnings(VALID) if "verbatim span" in w])
+        d = copy.deepcopy(VALID)
+        d["minimal_prompt"]["text"] = "Profile this CSV. Report  surprising columns first\n(high null ratio, a numeric column)."
+        self.assertTrue([w for w in self.warnings(d) if "verbatim span" in w])
+        d["minimal_prompt"]["text"] = "Profile a CSV file column by column (counts, nulls, numeric min/max/mean, top values)."
+        self.assertFalse([w for w in self.warnings(d) if "verbatim span" in w])
+
+    def test_prose_as_experimental_evidence_warns(self):
+        d = copy.deepcopy(VALID)
+        d["claims"][0]["assessment"]["effect"] = "experimentally_supported"
+        d["claims"][0]["experimental_evidence_locations"] = ["README.md:1"]
+        self.assertTrue([w for w in self.warnings(d) if "published data should be a data/results file" in w])
+        self.assertTrue(report._prose_location("@repo/docs/README-ja.md:3"))
+        self.assertTrue(report._prose_location("SKILL.md:10-12"))
+        self.assertFalse(report._prose_location("@repo/bench/results.csv:1-20"))
+
     def test_results_file_outside_audit_dir_is_rejected(self):
         outside = self.tmp / "outside"
         outside.mkdir()
@@ -249,7 +291,7 @@ class ReportTest(unittest.TestCase):
     def test_results_md_symlink_outside_is_not_embedded(self):
         exp = self.audit / "experiments" / "e1"
         exp.mkdir(parents=True)
-        (exp / "results.json").write_text("{}")
+        (exp / "results.json").write_text(RESULTS_JSON)
         (self.tmp / "secret.md").write_text("SECRET")
         (exp / "results.md").symlink_to(self.tmp / "secret.md")
         self.assertEqual(self.errors(self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")), [])
@@ -264,7 +306,7 @@ class ReportTest(unittest.TestCase):
         inv_path.write_text(json.dumps(inv))
         exp = self.audit / "experiments" / "e1"
         exp.mkdir(parents=True)
-        (exp / "results.json").write_text("{}")
+        (exp / "results.json").write_text(RESULTS_JSON)
         (exp / "results.md").write_text("| a |\n|---|\n| 1 |\n<img src=x onerror=alert(1)>\n</details>\n")
         d = self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")
         d["minimal_prompt"]["text"] = "Do this:\n```\n# Conclusion\n````"
@@ -294,7 +336,7 @@ class ReportTest(unittest.TestCase):
     def test_untrusted_text_cannot_form_links_or_images(self):
         exp = self.audit / "experiments" / "e1"
         exp.mkdir(parents=True)
-        (exp / "results.json").write_text("{}")
+        (exp / "results.json").write_text(RESULTS_JSON)
         (exp / "results.md").write_text("![px](https://attacker.invalid/r.png) [x][1]\n\n[1]: https://attacker.invalid/r\n")
         d = self.run_with_results(copy.deepcopy(VALID), "experiments/e1/results.json")
         d["features"][0]["name"] = "![preview](https://attacker.invalid/pixel)"

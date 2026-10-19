@@ -18,6 +18,7 @@ import csv
 import datetime as dt
 import json
 import math
+import os
 import platform
 import random
 import re
@@ -44,7 +45,7 @@ from exp_plan import (  # noqa: E402
 from exp_render import render_activation_md, render_md  # noqa: E402
 from exp_sandbox import (  # noqa: E402
     FileSizeLimitExceeded, bwrap_status, build_checked_argv, build_settings, claude_version, isolation_deny_dirs, make_workdir,
-    resolve_backend_argv, run_process, safe_rmtree, sandbox_run, stdin_payload,
+    resolve_backend_argv, run_process, safe_rmtree, sandbox_run, stdin_payload, workdir_base,
 )
 from exp_stats import (  # noqa: E402
     BOOTSTRAP_RESAMPLES, MIN_N, PARETO_DEFINITIONS, UNSTABLE_MARGIN, UNSTABLE_MIN_N, band_label, bootstrap_diff_ci,
@@ -57,8 +58,8 @@ from exp_tree import (  # noqa: E402
 )
 
 RESULTS_SCHEMA = "slop-skill-auditor/experiment-results@1"
-SELFTEST_SCHEMA = "slop-skill-auditor/experiment-selftest@2"
-SELFTEST_SUMMARY_KEYS = ("sandbox_ok", "file_isolation_ok", "unsandboxed_bash_denied", "hooks_disabled", "ran_at")
+SELFTEST_SCHEMA = "slop-skill-auditor/experiment-selftest@3"
+SELFTEST_SUMMARY_KEYS = ("sandbox_ok", "file_isolation_ok", "write_isolation_ok", "unsandboxed_bash_denied", "hooks_disabled", "ran_at")
 PAIRS = (("C", "A"), ("C", "B"), ("B", "A"))
 CHECK_TIMEOUT_S = 300
 REFERENCE_COMMAND_TIMEOUT_S = 60
@@ -161,6 +162,10 @@ SELFTEST_PROMPT = """This is an automated isolation self-test. Perform each step
 8. Read tool: {exp_probe}
 9. Grep tool: pattern SLOPPROBE in path {skill_dir}
 10. Glob tool: pattern *.txt in path {wd}
+11. Bash tool: echo WPROBE > {bash_write_experiment_dir}
+12. Bash tool: echo WPROBE > {bash_write_temp_sibling}
+13. Write tool: create {write_tool_experiment_dir} with content WPROBE
+14. Write tool: create {write_tool_temp_sibling} with content WPROBE
 Then reply DONE."""
 HOOK_SKILL = "slop-hook-probe"
 HOOK_EVENTS_SKILL = ("PreToolUse", "PostToolUse", "Stop")
@@ -202,13 +207,36 @@ def _step_result(parsed, tool, needle):
     return None
 
 
+def write_probe_steps(parsed: dict, markers: dict) -> dict:
+    steps = {}
+    for key, (tool, marker) in markers.items():
+        if marker.exists():
+            steps[key] = "allowed"
+        else:
+            steps[key] = "blocked" if _step_result(parsed, tool, str(marker)) is not None else "not_attempted"
+    return steps
+
+
+def write_isolation(steps: dict, sandbox: bool) -> bool:
+    if any(v == "allowed" for v in steps.values()):
+        return False
+    return all(v == "blocked" for k, v in steps.items() if sandbox or k.startswith("write_tool_"))
+
+
 def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, timeout: int = 300, keep: Path | None = None) -> dict:
     wd = make_workdir("slop-selftest-")
+    sib = make_workdir("slop-selftest-sib-")
     token = "SLOPPROBE" + secrets.token_hex(8)
     tag = secrets.token_hex(4)
     probe = Path.home() / f".slop-sbx-probe-{tag}.txt"
     exp_probe = exp_dir / f".slop-selftest-probe-{tag}.txt"
     skill_probe = skill_dir / f".slop-selftest-probe-{tag}.txt"
+    write_markers = {
+        "bash_write_experiment_dir": ("Bash", exp_dir / f".slop-wprobe-bash-{tag}"),
+        "bash_write_temp_sibling": ("Bash", sib / f".slop-wprobe-bash-{tag}"),
+        "write_tool_experiment_dir": ("Write", exp_dir / f".slop-wprobe-tool-{tag}"),
+        "write_tool_temp_sibling": ("Write", sib / f".slop-wprobe-tool-{tag}"),
+    }
     try:
         for f in (probe, exp_probe, skill_probe):
             f.write_text(token + "\n", encoding="utf-8")
@@ -220,7 +248,8 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
             tools=probe_tools, budget=0.5,
         )
         transcript = wd.parent / (wd.name + ".jsonl")
-        prompt = f"/{HOOK_SKILL} " + SELFTEST_PROMPT.format(probe=probe, wd=wd, exp_probe=exp_probe, skill_probe=skill_probe, skill_dir=skill_dir)
+        prompt = f"/{HOOK_SKILL} " + SELFTEST_PROMPT.format(probe=probe, wd=wd, exp_probe=exp_probe, skill_probe=skill_probe, skill_dir=skill_dir,
+                                                                  **{k: m for k, (_, m) in write_markers.items()})
         code, _, err, timed_out = run_process(resolve_backend_argv(argv), stdin_payload(prompt), wd, timeout, stdout_path=transcript)
         parsed = parse_stream(transcript)
         raw = transcript.read_text(encoding="utf-8", errors="replace") if transcript.exists() else ""
@@ -265,44 +294,82 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         steps["bash_write_workdir"] = "ok" if b.is_file() else "failed"
         glob = _step_result(parsed, "Glob", str(wd))
         steps["glob_tool_workdir"] = "ok" if glob and "write_ok.txt" in glob else "failed"
+        wsteps = write_probe_steps(parsed, write_markers)
+        steps |= wsteps
         out["steps"] = steps
+        out["write_isolation_ok"] = write_isolation(wsteps, sandbox)
         out["token_leaked"] = leak
         out["hooks_disabled"] = not fired and out["hook_skill_loaded"]
         file_tools = ("read_tool_home_file", "read_tool_experiment_dir", "grep_tool_skill_source")
         if sandbox:
-            out["ok"] = (not leak and out["hooks_disabled"] and all(steps[k] == "blocked" for k in (*file_tools, "bash_read_home_file", "bash_network", "bash_list_home",
+            out["ok"] = (not leak and out["hooks_disabled"] and out["write_isolation_ok"] and all(steps[k] == "blocked" for k in (*file_tools, "bash_read_home_file", "bash_network", "bash_list_home",
                                                                                           "bash_read_experiment_and_skill_source"))
                          and all(steps[k] == "ok" for k in ("write_tool_workdir", "bash_write_workdir", "glob_tool_workdir")))
         else:
-            out["ok"] = (not leak and out["hooks_disabled"] and all(steps[k] == "blocked" for k in file_tools)
+            out["ok"] = (not leak and out["hooks_disabled"] and out["write_isolation_ok"] and all(steps[k] == "blocked" for k in file_tools)
                          and steps["write_tool_workdir"] == "ok" and steps["bash_write_workdir"] == "failed")
         if not out["hook_skill_loaded"]:
             out["reason"] = "probe skill did not load; hook test inconclusive"
         elif not out["ok"]:
-            out["reason"] = "expected isolation not observed (see steps, hooks_fired, token_leaked)"
+            out["reason"] = "expected isolation not observed (see steps, hooks_fired, token_leaked, write_isolation_ok)"
         return out
     finally:
-        for f in (probe, exp_probe, skill_probe):
+        for f in (probe, exp_probe, skill_probe, *(m for _, m in write_markers.values())):
             f.unlink(missing_ok=True)
         shutil.rmtree(wd, ignore_errors=True)
+        shutil.rmtree(sib, ignore_errors=True)
+
+
+def selftest_environment(version: str | None) -> dict:
+    canonical = Path("/slop-canonical/wd")
+    shapes = [build_settings(canonical, sb, deny_bash=not sb, deny_dirs=["/slop-canonical/deny"]) for sb in (True, False)]
+    try:
+        base = str(workdir_base())
+    except ExperimentError as e:
+        base = f"unavailable: {e}"
+    env = {
+        "claude_version": version, "platform": platform.platform(), "tmpdir": os.environ.get("TMPDIR"), "workdir_base": base,
+        "bwrap": bool(shutil.which("bwrap")), "socat": bool(shutil.which("socat")),
+        "settings_sha256": sha256_bytes(json.dumps(shapes, sort_keys=True).encode()),
+        "prompt_sha256": sha256_bytes(SELFTEST_PROMPT.encode()),
+    }
+    return env | {"key": sha256_bytes(json.dumps(env, sort_keys=True).encode())}
+
+
+def selftest_cache_valid(cached, env: dict) -> bool:
+    if not isinstance(cached, dict) or cached.get("schema") != SELFTEST_SCHEMA or cached.get("environment") != env:
+        return False
+    sb, perm = cached.get("sandbox"), cached.get("permissions_only")
+    if not (isinstance(sb, dict) and isinstance(perm, dict)):
+        return False
+    flags = ("sandbox_ok", "file_isolation_ok", "unsandboxed_bash_denied", "hooks_disabled", "write_isolation_ok")
+    if not all(isinstance(cached.get(k), bool) for k in flags):
+        return False
+    return (cached["sandbox_ok"] == (sb.get("ok") is True) and cached["file_isolation_ok"] == (perm.get("ok") is True)
+            and cached["write_isolation_ok"] == (sb.get("write_isolation_ok") is True and perm.get("write_isolation_ok") is True))
 
 
 def do_selftest(exp_dir: Path, model: str = "haiku", force: bool = False) -> dict:
     path = plan_paths(exp_dir)["selftest"]
     version = claude_version()
+    env = selftest_environment(version)
     if path.is_file() and not force:
-        cached = load_json(path)
-        if cached.get("claude_version") == version and cached.get("schema") == SELFTEST_SCHEMA:
+        try:
+            cached = load_json(path)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            cached = None
+        if selftest_cache_valid(cached, env):
             return cached
     skill_dir = resolve_path(exp_dir, load_plan(exp_dir)["skill"]["dir"])
     sb = selftest_probe(model, sandbox=True, exp_dir=exp_dir, skill_dir=skill_dir, keep=path.with_name("selftest_sandbox.jsonl"))
     perm = selftest_probe(model, sandbox=False, exp_dir=exp_dir, skill_dir=skill_dir, keep=path.with_name("selftest_permissions.jsonl"))
     data = {
         "schema": SELFTEST_SCHEMA, "ran_at": now_iso(), "claude_version": version, "model": model,
-        "platform": platform.platform(), "bwrap": bool(shutil.which("bwrap")), "socat": bool(shutil.which("socat")),
+        "platform": env["platform"], "bwrap": env["bwrap"], "socat": env["socat"], "environment": env,
         "sandbox": sb, "permissions_only": perm,
-        "sandbox_ok": bool(sb.get("ok")),
-        "file_isolation_ok": bool(perm.get("ok")),
+        "sandbox_ok": sb.get("ok") is True,
+        "file_isolation_ok": perm.get("ok") is True,
+        "write_isolation_ok": sb.get("write_isolation_ok") is True and perm.get("write_isolation_ok") is True,
         "unsandboxed_bash_denied": perm.get("steps", {}).get("bash_write_workdir") == "failed" and perm.get("started", False),
         "hooks_disabled": bool(sb.get("hooks_disabled")) and bool(perm.get("hooks_disabled")),
         "cost_usd": round(sum(x.get("cost_usd") or 0 for x in (sb, perm)), 6),
@@ -526,8 +593,8 @@ def decide_mode(plan: dict, exp_dir: Path, allow_unsandboxed: bool, dry_run: boo
         if dry_run:
             return mode
         st = do_selftest(exp_dir, model="haiku")
-        if not (st.get("file_isolation_ok") and st.get("hooks_disabled")):
-            raise ExperimentError("permission-rule isolation selftest failed (file isolation or disabled hooks); refusing to run")
+        if not (st.get("file_isolation_ok") and st.get("hooks_disabled") and st["permissions_only"].get("write_isolation_ok")):
+            raise ExperimentError("permission-rule isolation selftest failed (file/write isolation or disabled hooks); refusing to run")
         return mode
     if dry_run:
         st_path = plan_paths(exp_dir)["selftest"]
@@ -535,7 +602,7 @@ def decide_mode(plan: dict, exp_dir: Path, allow_unsandboxed: bool, dry_run: boo
         mode.update(name="sandbox" if ok else "sandbox (selftest pending/failed)", sandbox=True)
         return mode
     st = do_selftest(exp_dir, model="haiku")
-    if st.get("sandbox_ok"):
+    if st.get("sandbox_ok") and st["sandbox"].get("write_isolation_ok"):
         mode.update(name="sandbox", sandbox=True)
         return mode
     if not allow_unsandboxed:
@@ -545,7 +612,7 @@ def decide_mode(plan: dict, exp_dir: Path, allow_unsandboxed: bool, dry_run: boo
             + ". Fix the sandbox, or rerun with --allow-unsandboxed (Bash is then denied by an explicit deny rule, "
             "file tools stay restricted to the workdir)."
         )
-    if not st.get("file_isolation_ok"):
+    if not (st.get("file_isolation_ok") and st["permissions_only"].get("write_isolation_ok")):
         raise ExperimentError("permission-rule isolation selftest also failed; refusing to run even with --allow-unsandboxed")
     mode.update(name="unsandboxed (Bash denied by rule)", sandbox=False, bash_denied=True)
     return mode
@@ -1321,7 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "selftest":
             load_plan(exp_dir)
             st = do_selftest(exp_dir, a.model, a.force)
-            print(json.dumps({k: st.get(k) for k in ("sandbox_ok", "file_isolation_ok", "unsandboxed_bash_denied", "hooks_disabled", "cost_usd")}
+            print(json.dumps({k: st.get(k) for k in ("sandbox_ok", "file_isolation_ok", "write_isolation_ok", "unsandboxed_bash_denied", "hooks_disabled", "cost_usd")}
                              | {"sandbox_reason": st["sandbox"].get("reason"), "path": str(plan_paths(exp_dir)["selftest"])}))
             return 0 if st.get("sandbox_ok") else 3
         if a.cmd == "run":

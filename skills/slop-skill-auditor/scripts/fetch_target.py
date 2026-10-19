@@ -7,6 +7,7 @@ import os
 import posixpath
 import re
 import shutil
+import signal
 import socket
 import ssl
 import stat
@@ -36,6 +37,7 @@ GIT_HEAD_MAX_BYTES = 4096
 GIT_PACKED_MAX_BYTES = 8 * 1024 * 1024
 DOC_DEADLINE = 120
 DOC_MAX_REDIRECTS = 5
+GIT_NETWORK_TIMEOUT = 300
 
 
 class FetchError(Exception):
@@ -50,14 +52,24 @@ def git_env():
     return env
 
 
-def run_git(args, cwd=None, check=True, extra=()):
-    proc = subprocess.run(
-        ["git"] + GIT_HARDENING + list(extra) + args, cwd=cwd, env=git_env(),
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-    if check and proc.returncode != 0:
-        raise FetchError("git %s failed: %s" % (" ".join(args[:2]), proc.stderr.strip()))
-    return proc
+def run_git(args, cwd=None, check=True, extra=(), deadline=None):
+    argv = ["git"] + GIT_HARDENING + list(extra) + args
+    timeout = None if deadline is None else deadline - time.monotonic()
+    if timeout is not None and timeout <= 0:
+        raise FetchError("git network operations exceeded %d s" % GIT_NETWORK_TIMEOUT)
+    # A new session so a timeout also kills git's transport helpers (git-remote-https etc.).
+    proc = subprocess.Popen(argv, cwd=cwd, env=git_env(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise FetchError("git %s exceeded the %d s limit for git network operations" % (" ".join(args[:2]), GIT_NETWORK_TIMEOUT))
+    result = subprocess.CompletedProcess(argv, proc.returncode, out, err)
+    if check and result.returncode != 0:
+        raise FetchError("git %s failed: %s" % (" ".join(args[:2]), err.strip()))
+    return result
 
 
 def parse_github_url(url):
@@ -295,26 +307,37 @@ def local_git_info(root, notes):
     return commit
 
 
-def ls_remote(repo_url):
-    return run_git(["ls-remote", "--heads", "--tags", repo_url]).stdout
+def ls_remote(repo_url, deadline=None):
+    return run_git(["ls-remote", "--heads", "--tags", repo_url], deadline=deadline).stdout
 
 
-def clone(repo_url, dest, ref, is_sha):
+def clone(repo_url, dest, ref, is_sha, deadline=None):
     base = ["clone", "--depth", "1", "--no-recurse-submodules", "--single-branch"]
     if ref is None:
-        run_git(base + ["--", repo_url, dest], extra=CLONE_ONLY)
+        run_git(base + ["--", repo_url, dest], extra=CLONE_ONLY, deadline=deadline)
     elif not is_sha:
-        run_git(base + ["--branch", ref, "--", repo_url, dest], extra=CLONE_ONLY)
+        run_git(base + ["--branch", ref, "--", repo_url, dest], extra=CLONE_ONLY, deadline=deadline)
     else:
         run_git(["init", "-q", dest], extra=CLONE_ONLY)
         run_git(["config", "core.symlinks", "false"], cwd=dest)
-        shallow = run_git(["fetch", "-q", "--depth", "1", "--no-recurse-submodules", repo_url, ref], cwd=dest, check=False)
+        shallow = run_git(["fetch", "-q", "--depth", "1", "--no-recurse-submodules", repo_url, ref], cwd=dest, check=False, deadline=deadline)
         if shallow.returncode == 0:
-            run_git(["checkout", "-q", "--detach", "FETCH_HEAD"], cwd=dest)
+            run_git(["checkout", "-q", "--detach", "FETCH_HEAD"], cwd=dest, deadline=deadline)
         else:
-            run_git(["fetch", "-q", "--no-recurse-submodules", repo_url, "+refs/heads/*:refs/remotes/origin/*"], cwd=dest)
-            run_git(["checkout", "-q", "--detach", ref], cwd=dest)
+            run_git(["fetch", "-q", "--no-recurse-submodules", repo_url, "+refs/heads/*:refs/remotes/origin/*"], cwd=dest, deadline=deadline)
+            run_git(["checkout", "-q", "--detach", ref], cwd=dest, deadline=deadline)
     return run_git(["rev-parse", "HEAD"], cwd=dest).stdout.strip()
+
+
+def tree_exceeds(root, limit):
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not (dirpath == root and d == ".git")]
+        for name in filenames:
+            total += os.lstat(os.path.join(dirpath, name)).st_size
+            if total > limit:
+                return True
+    return False
 
 
 def safe_doc_name(name, used):
@@ -465,9 +488,10 @@ def fetch(args):
         prov["repo_url"] = gh["repo_url"]
         if args.offline:
             raise FetchError("--offline: %s requires network access" % gh["kind"])
+        deadline = time.monotonic() + GIT_NETWORK_TIMEOUT
         ref, path, is_sha = args.ref, ".", bool(args.ref and SHA_RE.match(args.ref))
         if gh["rest"] is not None:
-            url_ref, path, is_sha = split_ref_path(gh["rest"], [] if SHA_RE.match(gh["rest"].split("/", 1)[0]) else parse_ls_remote(ls_remote(gh["repo_url"])))
+            url_ref, path, is_sha = split_ref_path(gh["rest"], [] if SHA_RE.match(gh["rest"].split("/", 1)[0]) else parse_ls_remote(ls_remote(gh["repo_url"], deadline)))
             if args.ref and args.ref != url_ref:
                 raise FetchError("--ref %s conflicts with ref %s in the URL" % (args.ref, url_ref))
             ref = url_ref
@@ -478,7 +502,13 @@ def fetch(args):
             if path == ".." or path.startswith("../") or path.startswith("/"):
                 raise FetchError("path in URL escapes the repository: %s" % path)
         prov["ref_requested"] = ref
-        prov["commit"] = clone(gh["repo_url"], source, ref, is_sha)
+        try:
+            prov["commit"] = clone(gh["repo_url"], source, ref, is_sha, deadline)
+            if tree_exceeds(source, LOCAL_REPO_MAX_BYTES):
+                raise FetchError("checked-out tree exceeds %d MB (excluding .git); clone deleted" % (LOCAL_REPO_MAX_BYTES >> 20))
+        except (FetchError, OSError):
+            shutil.rmtree(source, ignore_errors=True)
+            raise
         shutil.rmtree(os.path.join(source, ".git"), ignore_errors=True)
         base = os.path.join(source, path)
         if not os.path.isdir(base):

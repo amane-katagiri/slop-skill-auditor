@@ -72,9 +72,9 @@ class Base(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for k in ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_FIRE_HOOKS"):
+        for k in ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK"):
             os.environ.pop(k, None)
-        env_patch = mock.patch.object(sandbox, "ENV_ALLOW", sandbox.ENV_ALLOW + ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_JUDGE_NULL_OPTIONAL", "FAKE_FIRE_HOOKS"))
+        env_patch = mock.patch.object(sandbox, "ENV_ALLOW", sandbox.ENV_ALLOW + ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_JUDGE_NULL_OPTIONAL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK"))
         env_patch.start()
         self.addCleanup(env_patch.stop)
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -845,6 +845,80 @@ class IsolationTests(Base):
         self.assertNotIn("Grep", s["permissions"]["allow"])
         with self.assertRaisesRegex(plans.ExperimentError, "lies inside"):
             sandbox.isolation_deny_dirs(self.exp, self.skill, self.exp / "wd")
+
+    def test_settings_deny_writes_outside_workdir(self):
+        wd, deny = Path("/tmp/slop-trial-x"), ["/tmp/audit", "/tmp/slop-trial-y"]
+        s = sandbox.build_settings(wd, True, deny_dirs=deny)
+        fs = s["sandbox"]["filesystem"]
+        self.assertEqual(fs["denyWrite"], deny)
+        self.assertEqual(fs["allowWrite"], [str(wd)])
+        for d in deny:
+            for tool in ("Edit", "Write"):
+                self.assertIn(f"{tool}(/{d}/**)", s["permissions"]["deny"])
+        self.assertIn(f"Write(/{wd}/**)", s["permissions"]["allow"])
+        self.assertNotIn("sandbox", sandbox.build_settings(wd, False, deny_dirs=deny))
+
+    def test_write_isolation_logic(self):
+        all_blocked = dict.fromkeys(("bash_write_experiment_dir", "bash_write_temp_sibling",
+                                     "write_tool_experiment_dir", "write_tool_temp_sibling"), "blocked")
+        self.assertTrue(ex.write_isolation(all_blocked, True))
+        self.assertFalse(ex.write_isolation(all_blocked | {"bash_write_temp_sibling": "allowed"}, False))
+        self.assertFalse(ex.write_isolation(all_blocked | {"bash_write_temp_sibling": "not_attempted"}, True))
+        self.assertTrue(ex.write_isolation(all_blocked | {"bash_write_temp_sibling": "not_attempted"}, False))
+        self.assertFalse(ex.write_isolation(all_blocked | {"write_tool_experiment_dir": "not_attempted"}, False))
+
+    def test_selftest_detects_writes_outside_workdir(self):
+        self.init_capability(n=1)
+        st = ex.do_selftest(self.exp, force=True)
+        self.assertTrue(st["write_isolation_ok"])
+        for k in ("bash_write_experiment_dir", "bash_write_temp_sibling", "write_tool_experiment_dir", "write_tool_temp_sibling"):
+            self.assertEqual(st["sandbox"]["steps"][k], "blocked")
+        os.environ["FAKE_WRITE_LEAK"] = "wprobe-bash"
+        st = ex.do_selftest(self.exp, force=True)
+        self.assertFalse(st["sandbox"]["write_isolation_ok"])
+        self.assertEqual(st["sandbox"]["steps"]["bash_write_temp_sibling"], "allowed")
+        self.assertFalse(st["sandbox_ok"])
+        self.assertFalse(st["write_isolation_ok"])
+        self.assertTrue(st["file_isolation_ok"])
+        os.environ["FAKE_WRITE_LEAK"] = str(self.exp.resolve())
+        st = ex.do_selftest(self.exp, force=True)
+        self.assertEqual(st["permissions_only"]["steps"]["write_tool_experiment_dir"], "allowed")
+        self.assertFalse(st["file_isolation_ok"])
+        self.assertFalse(list(self.exp.glob(".slop-wprobe-*")))
+        self.freeze()
+        code, _, err = call("run", self.exp)
+        self.assertEqual(code, 2)
+        self.assertIn("write isolation", err)
+
+    def test_selftest_cache_is_keyed_and_validated(self):
+        self.init_capability(n=1)
+        first = ex.do_selftest(self.exp, force=True)
+        with mock.patch.object(ex, "selftest_probe", side_effect=AssertionError("rerun")):
+            self.assertEqual(ex.do_selftest(self.exp)["ran_at"], first["ran_at"])
+        path = self.exp / "selftest.json"
+        variants = [
+            lambda d: d["environment"].update(settings_sha256="0" * 64),
+            lambda d: d.update(sandbox_ok=not d["sandbox_ok"]),
+            lambda d: d.update(write_isolation_ok="yes"),
+            lambda d: d.pop("permissions_only"),
+        ]
+        for mutate in variants:
+            data = json.loads(path.read_text())
+            mutate(data)
+            path.write_text(json.dumps(data))
+            with mock.patch.object(ex, "selftest_probe", wraps=ex.selftest_probe) as probe:
+                ex.do_selftest(self.exp)
+            self.assertEqual(probe.call_count, 2)
+        path.write_text("{not json")
+        self.assertTrue(ex.do_selftest(self.exp)["sandbox_ok"])
+        key = ex.selftest_environment(ex.claude_version())["key"]
+        self.assertEqual(json.loads(path.read_text())["environment"]["key"], key)
+        with mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp)}):
+            self.assertNotEqual(ex.selftest_environment(ex.claude_version())["key"], key)
+        with mock.patch.object(ex, "build_settings", lambda *a, **k: {"x": 1}):
+            self.assertNotEqual(ex.selftest_environment(ex.claude_version())["key"], key)
+        with mock.patch.object(ex.shutil, "which", return_value=None):
+            self.assertNotEqual(ex.selftest_environment(ex.claude_version())["key"], key)
 
     def test_child_env_is_allowlisted(self):
         with mock.patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "s", "GITHUB_TOKEN": "t", "ANTHROPIC_API_KEY": "k"}):

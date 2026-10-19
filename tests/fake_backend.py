@@ -60,9 +60,19 @@ def selftest(cwd, prompt, sandbox):
         ("Grep", {"pattern": "SLOPPROBE", "path": re.search(r"in path (\S+)", prompt).group(1)}),
         ("Glob", {"pattern": "*.txt", "path": str(cwd)}),
     ]
+    uses += [("Bash", {"command": f"echo WPROBE > {t}"}) for t in re.findall(r"Bash tool: echo WPROBE > (\S+)", prompt)]
+    uses += [("Write", {"file_path": t, "content": "WPROBE"}) for t in re.findall(r"Write tool: create (\S+) with content WPROBE", prompt)]
+    leak = os.environ.get("FAKE_WRITE_LEAK", "")
     for i, (name, inp) in enumerate(uses):
         emit({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"t{i}", "name": name, "input": inp}]}})
-        if name == "Write":
+        if inp.get("content") == "WPROBE" or inp.get("command", "").startswith("echo WPROBE"):
+            target = Path(inp.get("file_path") or inp["command"].split()[-1])
+            if leak and leak in str(target) and (name == "Write" or sandbox):
+                target.write_text("WPROBE")
+                out = "File created"
+            else:
+                out = "Permission denied"
+        elif name == "Write":
             Path(m.group(1)).write_text("WRITE_OK")
             out = "File created"
         elif name == "Bash" and inp["command"].startswith("echo BASH_OK") and sandbox:

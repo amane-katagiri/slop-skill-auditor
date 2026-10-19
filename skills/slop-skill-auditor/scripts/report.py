@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import LOC_RE, LocationResolver, load_json, write_json  # noqa: E402
+from inventory import audit_inventory  # noqa: E402
 
 SCHEMA = "slop-skill-auditor/audit@1"
 
@@ -35,6 +36,8 @@ CONCLUSIONS = [
     "possible_negative_effect",
 ]
 MINIMAL_PROMPT_MAX_CHARS = 600
+RESULTS_SCHEMA = "slop-skill-auditor/experiment-results@1"
+VERBATIM_SPAN_CHARS = 40
 
 LABELS = {
     "ja": {
@@ -216,6 +219,44 @@ def _purpose_source(loc, frontmatter):
         return False
 
 
+def _load_results(path):
+    try:
+        data = load_json(path)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return None
+    return data if isinstance(data, dict) and data.get("schema") == RESULTS_SCHEMA else None
+
+
+def _results_have_data(results):
+    return any(isinstance(results.get(k), (dict, list)) and results[k] for k in ("cells", "pairwise", "per_task"))
+
+
+def _normalise(text):
+    return " ".join(text.split()).lower()
+
+
+def _shared_span(text, body, n=VERBATIM_SPAN_CHARS):
+    t, b = _normalise(text), _normalise(body)
+    return next((t[i:i + n] for i in range(len(t) - n + 1) if t[i:i + n] in b), None)
+
+
+def _skill_body(audit_dir, inventory):
+    root, fm = inventory.get("skill_root"), inventory.get("frontmatter") or {}
+    path = audit_dir / root / "SKILL.md" if isinstance(root, str) else None
+    if path is None or not path.is_file():
+        return ""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    end = fm.get("line_end") if fm.get("present") and isinstance(fm.get("line_end"), int) else 0
+    return "\n".join(lines[end:])
+
+
+def _prose_location(loc):
+    if not isinstance(loc, str):
+        return False
+    name = loc.rsplit(":", 1)[0].rsplit("/", 1)[-1]
+    return name == "SKILL.md" or name.upper().startswith("README")
+
+
 def _inside(audit_dir, path):
     return path.resolve().is_relative_to(audit_dir.resolve())
 
@@ -282,6 +323,14 @@ def check(audit_dir):
     inventory = _load_optional(audit_dir / "inventory.json")
     if inventory is None:
         f.warn("inventory.json", "not found; run inventory.py first so the report records the fingerprint")
+    elif (audit_dir / "provenance.json").is_file():
+        try:
+            current = audit_inventory(str(audit_dir))["fingerprint"]
+        except (OSError, ValueError, KeyError) as e:
+            f.error("inventory.json", f"cannot recompute the fingerprint from source/: {e}")
+        else:
+            if inventory.get("fingerprint") != current:
+                f.error("inventory.json", "inventory.json does not match source/; rerun inventory.py")
 
     if a.get("schema") != SCHEMA:
         f.error("schema", f"expected {SCHEMA!r}")
@@ -326,6 +375,7 @@ def check(audit_dir):
     _enum(status, ["not_run", "run"], "experiments.status", f)
     runs = _list(experiments, "runs", "experiments", f)
     run_ids = set()
+    run_results = {}
     for i, run in _objects(runs, "experiments.runs", f):
         where = f"experiments.runs[{i}]"
         rid = run.get("id")
@@ -339,7 +389,12 @@ def check(audit_dir):
         if not (audit_dir / rf).is_file():
             f.error(where, f"results_file {rf!r} is not a file")
             continue
+        results = _load_results(audit_dir / rf)
+        if results is None:
+            f.error(where, f"results_file {rf!r} is not JSON with schema {RESULTS_SCHEMA!r}")
+            continue
         run_ids.add(rid)
+        run_results[rid] = results
     if status == "not_run" and runs:
         f.error("experiments", "status is 'not_run' but runs are listed")
     if status == "run" and not run_ids:
@@ -369,6 +424,8 @@ def check(audit_dir):
         ext = _list(cl, "experimental_evidence_locations", where, f)
         for loc in ext:
             _check_loc(resolve, loc, where + ".experimental_evidence_locations", f)
+            if _prose_location(loc):
+                f.warn(where + ".experimental_evidence_locations", f"{loc!r}: published data should be a data/results file, not prose")
         ref = cl.get("experiment_ref")
         if ref is not None and status != "run":
             f.error(where, "experiment_ref is set but experiments.status is not 'run'")
@@ -377,6 +434,8 @@ def check(audit_dir):
         effect = assessment.get("effect")
         if effect == "experimentally_supported" and ref not in run_ids and not ext:
             f.error(where, "effect 'experimentally_supported' needs an experiment_ref with results or published-data locations")
+        if effect == "experimentally_supported" and ref in run_results and not _results_have_data(run_results[ref]):
+            f.error(where, f"effect 'experimentally_supported' but the results of {ref!r} contain no cells or comparisons")
         if effect == "not_supported_in_experiment" and ref not in run_ids:
             f.error(where, "effect 'not_supported_in_experiment' needs an experiment_ref with results")
         if assessment.get("consistency") == "inconsistent" and implementation == "confirmed" and effect != "not_supported_in_experiment":
@@ -395,6 +454,9 @@ def check(audit_dir):
 
     mp = _obj(a.get("minimal_prompt"), "minimal_prompt", f)
     text = _text(mp, "text", "minimal_prompt", f)
+    span = _shared_span(text, _skill_body(audit_dir, inventory)) if text and inventory else None
+    if span:
+        f.warn("minimal_prompt", f"text shares a verbatim span with the SKILL.md body ({span!r}); write it from the stated purpose, not the skill body")
     if len(text) > MINIMAL_PROMPT_MAX_CHARS:
         f.warn("minimal_prompt", f"text is {len(text)} chars; a minimal prompt should be a few lines a user would naturally write")
     if not _list(mp, "dropped", "minimal_prompt", f):

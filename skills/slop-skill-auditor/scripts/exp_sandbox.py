@@ -209,7 +209,7 @@ def build_settings(workdir: Path, sandbox: bool, deny_bash: bool = False, deny_d
         "permissions": {
             "allow": [f"Read(/{wd}/**)", f"Edit(/{wd}/**)", f"Write(/{wd}/**)", "Skill"],
             "deny": ["Read(~/**)", "Edit(~/**)", "WebFetch", "WebSearch"]
-                    + [f"{tool}(/{d}/**)" for d in deny_dirs for tool in ("Read", "Edit")],
+                    + [f"{tool}(/{d}/**)" for d in deny_dirs for tool in ("Read", "Edit", "Write")],
         },
     }
     if deny_bash:
@@ -220,7 +220,8 @@ def build_settings(workdir: Path, sandbox: bool, deny_bash: bool = False, deny_d
             "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
             "autoAllowBashIfSandboxed": True,
             "network": {"allowedDomains": [], "strictAllowlist": True},
-            "filesystem": {"denyRead": ["~/", *deny_dirs], "allowWrite": [wd]},
+            # The sandbox's default writable set includes Claude's temp dir, where experiments often live.
+            "filesystem": {"denyRead": ["~/", *deny_dirs], "allowWrite": [wd], "denyWrite": list(deny_dirs)},
         }
     return settings
 
