@@ -62,10 +62,25 @@ def selftest(cwd, prompt, sandbox):
     ]
     uses += [("Bash", {"command": f"echo WPROBE > {t}"}) for t in re.findall(r"Bash tool: echo WPROBE > (\S+)", prompt)]
     uses += [("Write", {"file_path": t, "content": "WPROBE"}) for t in re.findall(r"Write tool: create (\S+) with content WPROBE", prompt)]
+    scan_mode = os.environ.get("FAKE_SOCKET_SCAN", "")
+    script = re.search(r"Bash tool: python3 (\S+check_socket_isolation\.py)", prompt)
+    socket_outputs = {}
+    if scan_mode and script:
+        bind = re.search(r'Bash tool: (python3 -c ".*probe\.sock.*")', prompt).group(1)
+        uses.append(("Bash", {"command": bind}))
+        socket_outputs[len(uses) - 1] = "UNIX_BIND_OK"
+        if scan_mode in ("cat-then-run", "cat-only"):
+            uses.append(("Bash", {"command": f"cat {script.group(1)}"}))
+            socket_outputs[len(uses) - 1] = Path(script.group(1)).read_text()
+        if scan_mode in ("run", "cat-then-run"):
+            uses.append(("Bash", {"command": f"python3 {script.group(1)}"}))
+            socket_outputs[len(uses) - 1] = "HOST_SOCKET_SCAN_DONE"
     leak = os.environ.get("FAKE_WRITE_LEAK", "")
     for i, (name, inp) in enumerate(uses):
         emit({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"t{i}", "name": name, "input": inp}]}})
-        if inp.get("content") == "WPROBE" or inp.get("command", "").startswith("echo WPROBE"):
+        if i in socket_outputs:
+            out = socket_outputs[i]
+        elif inp.get("content") == "WPROBE" or inp.get("command", "").startswith("echo WPROBE"):
             target = Path(inp.get("file_path") or inp["command"].split()[-1])
             if leak and leak in str(target) and (name == "Write" or sandbox):
                 target.write_text("WPROBE")

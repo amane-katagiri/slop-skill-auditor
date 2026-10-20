@@ -73,9 +73,9 @@ class Base(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for k in ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK"):
+        for k in ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK", "FAKE_SOCKET_SCAN"):
             os.environ.pop(k, None)
-        env_patch = mock.patch.object(sandbox, "ENV_ALLOW", sandbox.ENV_ALLOW + ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_JUDGE_NULL_OPTIONAL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK"))
+        env_patch = mock.patch.object(sandbox, "ENV_ALLOW", sandbox.ENV_ALLOW + ("FAKE_NO_LOAD", "FAKE_SANDBOX_FAIL", "FAKE_JUDGE_NULL_OPTIONAL", "FAKE_FIRE_HOOKS", "FAKE_WRITE_LEAK", "FAKE_SOCKET_SCAN"))
         env_patch.start()
         self.addCleanup(env_patch.stop)
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -561,6 +561,17 @@ class SafetyTests(Base):
         self.assertFalse(st["sandbox_ok"])
         self.assertFalse(st["permissions_only"]["unix_sockets"])
         self.assertNotIn("host_sockets", st["permissions_only"]["steps"])
+
+    def test_socket_scan_judged_by_run_output_not_by_reading_the_script(self):
+        p = self.init_capability(n=1)
+        p["backend"]["sandbox_unix_sockets"] = True
+        self.save(p)
+        for mode, expected in (("run", "blocked"), ("cat-then-run", "blocked"), ("cat-only", "failed")):
+            with self.subTest(mode=mode):
+                os.environ["FAKE_SOCKET_SCAN"] = mode
+                st = ex.do_selftest(self.exp, force=True)
+                self.assertEqual(st["sandbox"]["steps"]["unix_bind_workdir"], "ok")
+                self.assertEqual(st["sandbox"]["steps"]["host_sockets"], expected)
 
     def test_optional_criterion_na(self):
         p = self.init_capability(n=1)

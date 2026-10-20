@@ -174,12 +174,15 @@ SELFTEST_UNIX_STEPS = """15. Bash tool: python3 -c "import socket; s=socket.sock
 16. Bash tool: python3 {wd}/check_socket_isolation.py
     (The script tries to connect to canary sockets that this self-test itself opened outside the workdir, and sends nothing. Every connection is expected to fail; that failure is the passing result.)
 """
+HOST_SOCKET_CONNECTED = "HOST_SOCKET_CONNECTED"
+HOST_SOCKET_SCAN_DONE = "HOST_SOCKET_SCAN_DONE"
+# The markers are split in the source so that a model reading the script (cat) does not print them.
 UNIX_PROBE_SCRIPT = """# Isolation check against the self-test's own canary sockets: each connect() must fail inside the sandbox.
 import socket
 for p in {paths!r}:
     if socket.socket(socket.AF_UNIX).connect_ex(p) == 0:
-        print("HOST_SOCKET_CONNECTED", p)
-print("HOST_SOCKET_SCAN_DONE")
+        print("HOST_SOCKET" + "_CONNECTED", p)
+print("HOST_SOCKET" + "_SCAN" + "_DONE")
 """
 HOOK_SKILL = "slop-hook-probe"
 HOOK_EVENTS_SKILL = ("PreToolUse", "PostToolUse", "Stop")
@@ -211,14 +214,20 @@ def install_hook_probes(wd: Path) -> list[Path]:
     return markers
 
 
-def _step_result(parsed, tool, needle):
+def _step_results(parsed, tool, needle):
+    out = []
     for tu in parsed["tool_uses"]:
         if tu.get("name") != tool:
             continue
         inp = tu.get("input") if isinstance(tu.get("input"), dict) else {}
         if any(isinstance(v, str) and needle in v for v in inp.values()):
-            return parsed["tool_results"].get(tu.get("id"), "")
-    return None
+            out.append(parsed["tool_results"].get(tu.get("id"), ""))
+    return out
+
+
+def _step_result(parsed, tool, needle):
+    results = _step_results(parsed, tool, needle)
+    return results[0] if results else None
 
 
 def write_probe_steps(parsed: dict, markers: dict) -> dict:
@@ -360,11 +369,12 @@ def selftest_probe(model: str, sandbox: bool, exp_dir: Path, skill_dir: Path, ti
         if unix_sockets:
             bind = _step_result(parsed, "Bash", "probe.sock")
             steps["unix_bind_workdir"] = "ok" if bind and "UNIX_BIND_OK" in bind else "failed"
-            scan = _step_result(parsed, "Bash", "check_socket_isolation.py")
+            scans = _step_results(parsed, "Bash", "check_socket_isolation.py")
             out["canary_connections"] = sorted(set(canaries.accepted))
-            steps["host_sockets"] = ("allowed" if canaries.accepted or (scan and "HOST_SOCKET_CONNECTED" in scan)
-                                     else "not_attempted" if scan is None
-                                     else "blocked" if "HOST_SOCKET_SCAN_DONE" in scan and canaries.paths else "failed")
+            steps["host_sockets"] = ("allowed" if canaries.accepted or any(HOST_SOCKET_CONNECTED in s for s in scans)
+                                     else "not_attempted" if not scans
+                                     else "blocked" if any(HOST_SOCKET_SCAN_DONE in s for s in scans) and canaries.paths
+                                     else "failed")
         out["steps"] = steps
         out["write_isolation_ok"] = write_isolation(wsteps, sandbox)
         out["token_leaked"] = leak
